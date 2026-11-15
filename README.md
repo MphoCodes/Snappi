@@ -38,7 +38,7 @@ xcodebuild -project Snappi.xcodeproj -scheme Snappi -configuration Debug \
 - Real synthetic video export: Noir applied to rendered pixels, duration retained, portrait orientation retained, original source preserved, missing input errors.
 - Signed physical-device build passed; installed and launched on the connected iPhone 17 Pro Max.
 - Independent code review found no confirmed high-priority defects. Permission resume recovery was strengthened.
-- User confirmed a real captured photo and short video both appear in Your roll on the iPhone. Audio playback, Photos export, interruptions and broader UI behaviour remain unverified. Mirroring was unavailable because the phone was in use.
+- User confirmed a real captured photo and short video both appear in Your roll on the iPhone. User also confirmed video sound and Save to Photos work. Interruptions and broader UI/device behaviour remain unverified. Mirroring was unavailable because the phone was in use.
 - Mac video-test compilation reports deprecated AVFoundation API warnings; these compatibility APIs support the iOS 17 deployment floor. Device build has only the informational AppIntents metadata warning.
 
 ## Installation lifetime

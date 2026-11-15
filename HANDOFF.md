@@ -17,3 +17,5 @@ Development profile expires 22 November 2026 23:39 SAST. Maintain local captures
 
 ## User device verification
 User confirmed that a captured photo and short video both appear in Your roll on the iPhone. This verifies real-device capture through local gallery for those samples. Audio playback, Photos export, interruptions and broader device behaviour remain unverified.
+
+User subsequently confirmed “it works” in response to checking video sound and Save to Photos. Record audio playback and Photos export as user-reported passing; interruptions and broader device coverage remain unverified.
