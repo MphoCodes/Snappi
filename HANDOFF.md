@@ -1,13 +1,13 @@
 # Snappi
 
-User chose the name Snappi for a free native iPhone photo and vintage-video camera app inspired by Dazz Cam. Both photo and video are required. No implementation yet.
+User chose the name Snappi for a free native iPhone photo and vintage-video camera app inspired by Dazz Cam. Both photo and video are required. First implementation is now installed; see the implementation section below.
 
 ## Approved brand direction
 15 November 2026: user selected concept 03 Daylight from branding/snappi-colour-directions-v4.png. Turquoise optical lens, deep navy background, cream reflection, clean lowercase wordmark. Prior orange cartoon camera, monochrome abstract S and monochrome gallery-icon concepts were rejected. Colour is wanted, with clear photographic recognition and a polished character.
 
 Assets: branding/snappi-app-icon-master.png (square opaque raster master; needs platform-size export when implementing), branding/snappi-logo-horizontal.png (repo header). Generated raster artwork, not editable vector masters. Earlier concepts retained as exploration only.
 
-Next: create project repository with selected branding and agree implementation scope. No GitHub repository has been created. Name/trademark availability not checked. Dazz settings were inspected via iPhone Mirroring; live camera quality was not verified. See chat for broader feature requirements. Signing/distribution constraints from Keep also apply to a free development install.
+Repository: https://github.com/MphoCodes/Snappi (private), main branch. Canonical memory project ID: MphoCodes/Snappi. Name/trademark availability not checked. Dazz settings were inspected via iPhone Mirroring; live camera quality was not verified. See chat for broader feature requirements. Signing/distribution constraints from Keep also apply to a free development install.
 
 ## First implementation — 15 November 2026
 
