@@ -14,3 +14,6 @@ Repository: https://github.com/MphoCodes/Snappi (private), main branch. Canonica
 User authorized build-out. Native SwiftUI/AVFoundation/Core Image app implemented in Snappi/, with shared live/photo/video effects, local gallery, photo import and Photos export. See README for exact scope and limitations. Main implementation plan in docs/superpowers/plans/. Image tests and synthetic video tests pass. Signed device build installed and launched; real capture/audio/export and UI verification remain pending user feedback. Mirroring could not view the phone because it was in use. Independent review found no confirmed high-priority issue; camera permission recovery on foreground was strengthened.
 
 Development profile expires 22 November 2026 23:39 SAST. Maintain local captures across updates. Originals survive processing failure. Videos capped at 60 seconds and render after recording. API compatibility warnings remain on macOS video-test compilation; iOS build clean except AppIntents metadata skip. No knowledge-graph ingestion tool identified; no graph replaced.
+
+## User device verification
+User confirmed that a captured photo and short video both appear in Your roll on the iPhone. This verifies real-device capture through local gallery for those samples. Audio playback, Photos export, interruptions and broader device behaviour remain unverified.
