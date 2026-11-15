@@ -38,7 +38,7 @@
         "INFOPLIST_KEY_NSCameraUsageDescription": "Snappi uses your camera to capture photos and videos with film-inspired looks.",
         "INFOPLIST_KEY_NSMicrophoneUsageDescription": "Snappi records audio with your videos when you allow microphone access.",
         "INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription": "Save your Snappi photos and videos to your photo library.",
-        "DEVELOPMENT_TEAM": "83QG4389UW",
+        "DEVELOPMENT_TEAM": "",
         "ENABLE_APP_SANDBOX": "YES",
         "ENABLE_PREVIEWS": "YES",
         "ENABLE_USER_SELECTED_FILES": "readonly",

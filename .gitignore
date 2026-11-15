@@ -3,3 +3,13 @@
 DerivedData/
 *.xcuserstate
 xcuserdata/
+
+# Local signing material and credentials
+.env
+.env.*
+*.p12
+*.p8
+*.mobileprovision
+*.xcarchive
+*.ipa
+Local.xcconfig

@@ -1,67 +1,90 @@
 <p align="center"><img src="branding/snappi-logo-horizontal.png" alt="Snappi" width="720"></p>
 
-# Snappi for iPhone
+# Snappi
 
-A personal photo and vintage-video camera, with six included looks and no accounts, ads, purchases or cloud processing.
+**An open-source iPhone camera for film-inspired photos and videos.**
 
-## Included controls
+Shoot, explore a look, and keep the moment. Snappi pairs six film-inspired treatments with tactile camera controls and a swipeable roll. Built with SwiftUI, AVFoundation and Core Image. Processing happens on your iPhone—no accounts, ads, subscriptions or cloud uploads.
 
-- Photo and video capture using the front/rear wide camera.
-- Live effect preview: Original, Daylight, Golden, Faded, Noir and Tape.
-- Adjustable effect strength, grain and warmth; camera exposure from −2 to +2 EV (clamped to device capabilities).
-- 1×/2×/3× digital zoom, photo flash/video torch where available, 3/10-second timer and composition grid.
-- Date stamps, remembering settings, optional original preservation.
-- Local gallery with full-screen swipe browsing, previous/next controls and a thumbnail strip; photo import, video playback, sharing and optional Photos export.
-- Pinch/double-tap photo zoom, selection haptics, animated film selection, recording progress and a saved-photo print animation. Reduce Motion disables decorative movement.
-- Labelled Flash/Torch, Timer, Flip and Zoom controls; swipe the viewfinder to change looks.
-- Film-strip thumbnails preview each look using the unfiltered camera frame, refreshed every two seconds.
-- Portrait video, up to 1080p, capped at 60 seconds per clip. Effects render after recording; keep Snappi open during processing.
+[MIT license](LICENSE) · iOS 17+ · Swift
 
-Camera permission is required for capture. Microphone access is requested for video; denied microphone access produces silent video. Photos add-only permission is optional: captures remain in Snappi even if export is denied. Deleting the app deletes its local library. Export anything you want to keep first.
+## What you can do
 
-The Original preset bypasses the preset colour treatment; grain/warmth/date-stamp controls remain independent. Set grain and warmth to zero and disable the date stamp for an untouched colour treatment. Preview is throttled to 15 fps and downscaled for responsiveness; full captured media is processed separately. This is a first development version, not a reproduction of Dazz Cam's proprietary rendering.
+- Capture photos and videos with the front or rear wide camera.
+- Explore Original, Daylight, Golden, Faded, Noir and Tape with live previews. Swipe the viewfinder or tap the film strip to change looks.
+- Tune effect strength, grain, warmth and camera exposure (−2 to +2 EV, clamped to device capabilities).
+- Use photo flash/video torch, a 3/10-second timer, composition grid, date stamp and 1×/2×/3× digital zoom.
+- Browse your roll full screen with swipe navigation, thumbnails, previous/next buttons and pinch/double-tap photo zoom.
+- Import photos, play videos, share captures and optionally save to Apple Photos.
+- Keep original captures alongside processed versions.
+- Get haptic feedback, animated look selection, shutter feedback, recording progress and a saved-photo print animation. Decorative motion respects Reduce Motion.
 
-## Current boundaries
+Portrait video supports up to 1080p and 60 seconds per clip. Effects render after recording; keep Snappi open while processing finishes.
 
-Portrait-only camera, front/rear wide lenses, digital zoom. No manual ISO/shutter, optical lens selector, RAW/Live Photos, double exposure or video import yet. No delete control in the local gallery yet; use Photos exports for external organization. No background export guarantee: original movie files are kept if processing does not complete.
+## Try it
 
-## Build
+This repository contains the source code. There is no public App Store release, TestFlight link or ready-to-install signed download yet. Making the source public does not remove Apple's iPhone signing requirements.
 
-Xcode 27.2 on the development Mac; iOS 17+. The project uses that Xcode installation's `project.xcproj` format. Automatic signing uses the owner's configured development team; change DEVELOPMENT_TEAM and bundle ID for another account.
+To build for an iPhone:
+
+1. Clone this repository and open `Snappi.xcodeproj` in Xcode.
+2. Select your own development team and a unique bundle identifier in the target's signing settings.
+3. Connect your iPhone, complete pairing and Developer Mode setup, then build and run.
+
+The project was built with Xcode 27.2 and uses its `project.xcproj` format. The deployment target is iOS 17 or later. Older Xcode releases may not open this project format.
+
+For a command-line device build, replace the placeholders with your signing details:
 
 ```sh
 xcodebuild -project Snappi.xcodeproj -scheme Snappi -configuration Debug \
-  -destination 'generic/platform=iOS' -allowProvisioningUpdates build
+  -destination 'generic/platform=iOS' \
+  DEVELOPMENT_TEAM=YOUR_TEAM_ID \
+  PRODUCT_BUNDLE_IDENTIFIER=com.yourname.snappi \
+  -allowProvisioningUpdates build
+```
+
+Development installs require periodic signing renewal; the lifetime depends on your Apple account and provisioning profile. Update in place to preserve local captures rather than uninstalling.
+
+## Your photos stay yours
+
+Camera permission is required for capture. Microphone permission is requested for video; without it, video is silent. Photos add-only permission is optional: captures stay in Snappi even if export is denied. There are no third-party services or analytics in the app.
+
+Deleting Snappi deletes its local library. Export any photos and videos you want to keep first. Original movie files are retained if effect processing fails; background export is not guaranteed.
+
+The Original look bypasses preset colour treatment. Grain, warmth and date-stamp controls remain independent; turn them off for an untouched colour treatment. The live preview is downscaled and capped at 15 fps. Small film-strip previews refresh every two seconds; captured media is processed separately.
+
+## Current limits
+
+This is an early native camera app. Capture is portrait-only and uses the front/rear wide cameras with digital zoom. Manual ISO/shutter, physical lens selection, RAW/Live Photos, double exposure, video import and gallery deletion are not implemented yet. The six looks are original treatments rather than calibrated reproductions of particular film stocks or cameras.
+
+## Development and checks
+
+Run the image and synthetic video checks on macOS:
+
+```sh
 ./Tests/run.sh
 ```
 
-## Verification
+The checks cover preset output, Original identity with independent effects off, zero-strength behaviour, finite image extents, rendered video effects, portrait orientation, duration, source preservation and invalid-input errors.
 
-- Core Image pixel tests: preset output, Original identity with independent effects off, zero-strength behaviour, Noir colour removal, finite extents.
-- Real synthetic video export: Noir applied to rendered pixels, duration retained, portrait orientation retained, original source preserved, missing input errors.
-- Signed physical-device build passed; installed and launched on the connected iPhone 17 Pro Max.
-- Independent code review found no confirmed high-priority defects. Permission resume recovery was strengthened.
-- User confirmed a real captured photo and short video both appear in Your roll on the iPhone. User also confirmed video sound and Save to Photos work. Interruptions and broader UI/device behaviour remain unverified. Mirroring was unavailable because the phone was in use.
-- Mac video-test compilation reports deprecated AVFoundation API warnings; these compatibility APIs support the iOS 17 deployment floor. Device build has only the informational AppIntents metadata warning.
+Device and simulator builds passed during development. Photo/video capture, audio, Photos export, photo swipes, double-tap zoom/reset and saved-photo feedback have been reported working on a physical iPhone. Pinch gestures, video page-away audio and broader interruption/device coverage still need dedicated testing. macOS video-test compilation reports AVFoundation deprecation warnings for APIs retained for the iOS 17 deployment target.
 
-## Installation lifetime
+| File | Responsibility |
+| --- | --- |
+| `Snappi/Effects.swift` | Shared Core Image treatments |
+| `Snappi/VideoRenderer.swift` | Filtered video export |
+| `Snappi/CameraController.swift` | Queue-confined capture and preview |
+| `Snappi/MediaLibrary.swift` | Media files, image processing and Photos export |
+| `Snappi/SnappiApp.swift` | Camera screen and settings |
+| `Snappi/CameraControls.swift` | Film previews, shutter and motion |
+| `Snappi/GalleryScreen.swift` | Paged viewer, zoom and playback lifecycle |
 
-The current development profile expires **22 November 2026 at 23:39 SAST**. It requires renewal before expiry. This is not App Store/TestFlight distribution. Do not uninstall to renew: updating in place preserves the local library.
+## Contributing
 
-## Implementation
+Issues and focused pull requests are welcome. Describe the device, iOS version, steps to reproduce and expected behaviour for bugs. Preserve original media on processing failures, keep processing on device, and respect Reduce Motion. Include relevant test results with changes to capture or rendering.
 
-- `Effects.swift`: shared Core Image processing.
-- `VideoRenderer.swift`: filtered movie export.
-- `CameraController.swift`: queue-confined AVFoundation capture and preview.
-- `MediaLibrary.swift`: durable files, image processing, Photos export.
-- `SnappiApp.swift`: SwiftUI camera and settings.
-- `CameraControls.swift`: film previews, shutter and motion.
-- `GalleryScreen.swift`: full-screen paged viewer, photo zoom and video lifecycle.
+## License
 
-Selected brand: Daylight (turquoise lens, navy, cream reflection). Master artwork lives in `branding/`; earlier rejected concepts are retained for history. Name/trademark availability has not been checked.
+Snappi is available under the [MIT license](LICENSE).
 
-## Dazz Cam comparison
-
-Snappi shares basic controls (flash, timer, grid, exposure compensation, colour adjustment, import and retro looks). It does **not** have full Dazz Cam settings parity. Dazz's [official listing](https://apps.apple.com/us/app/dazz-cam-vintage-camera/id1422471180) describes manual ISO/shutter, double exposure and optional fisheye/prism/starburst/ND accessories, which are not implemented here. Physical lens selection, Live Photos and the broader camera catalogue are also outside this build. Snappi's six looks are its own treatments, not copies of Dazz's rendering.
-
-The 1.1 polish pass preserves capture files in place. Full-screen viewing, next-photo navigation and double-tap zoom/reset were visually checked on the physical phone through Mirroring. Real capture feedback and live thumbnails cannot be verified through Mirroring because iOS blocks the camera there. Finger swipe/pinch behaviour and video page-away playback still need direct on-device confirmation; static review checks the player cleanup paths.
+The Daylight artwork in `branding/` uses a turquoise lens, deep navy and a cream reflection. The raster artwork was AI-generated; earlier concepts are retained as design exploration.
