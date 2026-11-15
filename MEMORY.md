@@ -1,6 +1,6 @@
 # Snappi project context
 
-Repository: https://github.com/MphoCodes/Snappi
+Public repository: https://github.com/MphoCodes/Snappi
 Canonical shared-memory project ID: `MphoCodes/Snappi`.
 
 ## Product and identity
@@ -20,3 +20,5 @@ Version 1.1 (build 2) includes live per-look thumbnails, labelled controls, swip
 Image pipeline and synthetic video checks passed. Device/simulator builds passed. Physical-device capture, audio, Photos export, photo swipes, double-tap zoom/reset and saved-photo animation are user-reported passing. Pinch and video page-away audio were not separately confirmed. Broader interruption/device testing remains open.
 
 See README for build steps, exact feature boundaries and installation requirements. Configure signing locally; never commit credentials, signing profiles, certificates or personal capture files. No knowledge-graph ingestion tool was available at publication; the portable files and shared Agent Memory carry current context, and no existing graph was replaced.
+
+Publication verified on 16 November 2026 using an unauthenticated GitHub API request: public visibility, MIT license, approved description and camera/iOS/Swift topics. The simulator build passed after removing the hard-coded signing team. Reachable Git history was scanned for credential-like content and signing file types; none were found.

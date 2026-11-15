@@ -1,6 +1,6 @@
 # Snappi handoff
 
-Repository: https://github.com/MphoCodes/Snappi
+Public repository: https://github.com/MphoCodes/Snappi
 Branch: `main`. Shared-memory project ID: `MphoCodes/Snappi`.
 
 ## Current state
@@ -23,3 +23,5 @@ The source is available for developers to build. Public source is not a signed i
 Use `./Tests/run.sh` for image and synthetic movie checks, and Xcode for device/simulator builds. The project uses Xcode 27.2's `project.xcproj` format. macOS AVFoundation test warnings reflect compatibility APIs for iOS 17.
 
 See `MEMORY.md` for product decisions and architecture. No project knowledge-ingestion tool was available; no graph refresh or replacement was performed. Do not store credentials or private captures in this repository.
+
+Publication verified on 16 November 2026 using an unauthenticated GitHub API request: public visibility, MIT license, approved description and camera/iOS/Swift topics. The simulator build passed after removing the hard-coded signing team. Reachable Git history was scanned for credential-like content and signing file types; none were found.
