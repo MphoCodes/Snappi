@@ -6,6 +6,8 @@ import Combine
 
 final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVCapturePhotoCaptureDelegate, AVCaptureFileOutputRecordingDelegate, @unchecked Sendable {
     @Published var preview: UIImage?
+    @Published var lookPreviews: [FilmLook: UIImage] = [:]
+    @Published var photoCaptured = 0
     @Published var ready = false
     @Published var denied = false
     @Published var busy = false
@@ -39,6 +41,7 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     private let lock = NSLock()
     private let context = CIContext(options: [.cacheIntermediates: false])
     private var lastFrame = CFAbsoluteTimeGetCurrent()
+    private var lastLookPreview: CFAbsoluteTime = 0
     private var front = false
     private var observers: [NSObjectProtocol] = []
     override init() {
@@ -156,6 +159,9 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
         if self.photo.supportedFlashModes.contains(flash ? .on : .off) { settings.flashMode = flash ? .on : .off }
         self.photo.capturePhoto(with: settings, delegate: self)
     } }
+    func photoOutput(_ output: AVCapturePhotoOutput, didCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings) {
+        publish { $0.photoCaptured += 1 }
+    }
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         queue.async {
             let settings = self.shotOptions, preserve = self.shotKeepOriginal, export = self.shotAutoExport
@@ -246,5 +252,20 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
         let rendered = Effects.apply(frame, settings: settings)
         guard let image = context.createCGImage(rendered, from: rendered.extent) else { return }
         publish { $0.preview = UIImage(cgImage: image) }
+        // Tiny previews use the unfiltered frame, never a second filter over the active look.
+        // Throttled on the existing serial frame queue: no backlog and no per-frame SwiftUI filters.
+        if now - lastLookPreview > 2 {
+            lastLookPreview = now
+            let size = 128 / frame.extent.width
+            let sample = frame.transformed(by: CGAffineTransform(scaleX: size, y: size))
+            var previews: [FilmLook: UIImage] = [:]
+            for look in FilmLook.allCases {
+                var option = settings; option.look = look
+                let result = Effects.apply(sample, settings: option)
+                if let cg = context.createCGImage(result, from: result.extent) { previews[look] = UIImage(cgImage: cg) }
+            }
+            let completed = previews
+            publish { $0.lookPreviews = completed }
+        }
     }
 }

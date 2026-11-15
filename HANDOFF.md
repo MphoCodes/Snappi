@@ -19,3 +19,13 @@ Development profile expires 22 November 2026 23:39 SAST. Maintain local captures
 User confirmed that a captured photo and short video both appear in Your roll on the iPhone. This verifies real-device capture through local gallery for those samples. Audio playback, Photos export, interruptions and broader device behaviour remain unverified.
 
 User subsequently confirmed “it works” in response to checking video sound and Save to Photos. Record audio playback and Photos export as user-reported passing; interruptions and broader device coverage remain unverified.
+
+## 16 November 2026 — interaction polish
+
+User rejected the initial UI as generic/dead, then specifically requested intuitive controls, visible animation and swiping between photos. Keep the approved Daylight logo. Implemented 1.1 (build 2): live 128px per-look thumbnails every two seconds from unfiltered frames; labelled Flash/Torch/Timer/Flip/Zoom; viewfinder swipes for looks; moving film selection; shutter keyframe feedback, haptics, recording ring/readout and a 950ms saved-photo print. Respect Reduce Motion.
+
+Gallery now opens a full-screen TabView pager with count, previous/next buttons, thumbnail navigation, share/save for the selected URL, and native UIScrollView pinch/double-tap zoom. Decode only current/neighbour photos to max2400px; pause/release video players when inactive/backgrounded. Inner photo pan is disabled at 1x so the pager owns swipes, enabled when zoomed. Existing captures are never migrated/deleted.
+
+Verification so far: device/simulator builds passed, existing image/video pipeline checks passed; review caught/fixed coalesced shutter blink (now keyframes) and found no confirmed remaining regression. Physical-phone Mirroring showed the updated labelled camera, full-screen viewer, next-photo navigation, and double-tap zoom/reset. Mirroring camera access is blocked by iOS; live thumbnails/capture animation need direct phone check. Horizontal drag could not be reliably reproduced through Mirroring; direct finger swipe/pinch and video page-away audio are not yet verified. Final gesture refinement built successfully and installed/launched on the physical phone on 16 November. User was asked to check swipe/pinch and capture feedback directly; response pending.
+
+Settings are not all equivalent to Dazz Cam: missing manual ISO/shutter, optical lens selection, Live Photos, double exposure, accessory effects, video import and broader profile catalogue. Source: Dazz's official App Store listing, checked 15 Nov. No project knowledge-ingestion tool is installed; portable handoff and shared Agent Memory are the available context, no graph replaced.

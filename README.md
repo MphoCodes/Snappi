@@ -4,14 +4,17 @@
 
 A personal photo and vintage-video camera, with six included looks and no accounts, ads, purchases or cloud processing.
 
-## First build
+## Included controls
 
 - Photo and video capture using the front/rear wide camera.
 - Live effect preview: Original, Daylight, Golden, Faded, Noir and Tape.
 - Adjustable effect strength, grain and warmth; camera exposure from −2 to +2 EV (clamped to device capabilities).
 - 1×/2×/3× digital zoom, photo flash/video torch where available, 3/10-second timer and composition grid.
 - Date stamps, remembering settings, optional original preservation.
-- Local gallery, photo import, video playback, sharing and optional Photos export.
+- Local gallery with full-screen swipe browsing, previous/next controls and a thumbnail strip; photo import, video playback, sharing and optional Photos export.
+- Pinch/double-tap photo zoom, selection haptics, animated film selection, recording progress and a saved-photo print animation. Reduce Motion disables decorative movement.
+- Labelled Flash/Torch, Timer, Flip and Zoom controls; swipe the viewfinder to change looks.
+- Film-strip thumbnails preview each look using the unfiltered camera frame, refreshed every two seconds.
 - Portrait video, up to 1080p, capped at 60 seconds per clip. Effects render after recording; keep Snappi open during processing.
 
 Camera permission is required for capture. Microphone access is requested for video; denied microphone access produces silent video. Photos add-only permission is optional: captures remain in Snappi even if export is denied. Deleting the app deletes its local library. Export anything you want to keep first.
@@ -51,6 +54,14 @@ The current development profile expires **22 November 2026 at 23:39 SAST**. It r
 - `VideoRenderer.swift`: filtered movie export.
 - `CameraController.swift`: queue-confined AVFoundation capture and preview.
 - `MediaLibrary.swift`: durable files, image processing, Photos export.
-- `SnappiApp.swift`: SwiftUI camera, controls and gallery.
+- `SnappiApp.swift`: SwiftUI camera and settings.
+- `CameraControls.swift`: film previews, shutter and motion.
+- `GalleryScreen.swift`: full-screen paged viewer, photo zoom and video lifecycle.
 
 Selected brand: Daylight (turquoise lens, navy, cream reflection). Master artwork lives in `branding/`; earlier rejected concepts are retained for history. Name/trademark availability has not been checked.
+
+## Dazz Cam comparison
+
+Snappi shares basic controls (flash, timer, grid, exposure compensation, colour adjustment, import and retro looks). It does **not** have full Dazz Cam settings parity. Dazz's [official listing](https://apps.apple.com/us/app/dazz-cam-vintage-camera/id1422471180) describes manual ISO/shutter, double exposure and optional fisheye/prism/starburst/ND accessories, which are not implemented here. Physical lens selection, Live Photos and the broader camera catalogue are also outside this build. Snappi's six looks are its own treatments, not copies of Dazz's rendering.
+
+The 1.1 polish pass preserves capture files in place. Full-screen viewing, next-photo navigation and double-tap zoom/reset were visually checked on the physical phone through Mirroring. Real capture feedback and live thumbnails cannot be verified through Mirroring because iOS blocks the camera there. Finger swipe/pinch behaviour and video page-away playback still need direct on-device confirmation; static review checks the player cleanup paths.

@@ -59,13 +59,13 @@ enum MediaLibrary {
             else { PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: url) }
         }
     }
-    static func thumbnail(_ item: CaptureItem) async -> UIImage? {
+    static func thumbnail(_ item: CaptureItem, maxPixelSize: Int = 800) async -> UIImage? {
         if item.isVideo {
             let generator = AVAssetImageGenerator(asset: AVURLAsset(url: item.url)); generator.appliesPreferredTrackTransform = true
             generator.maximumSize = CGSize(width: 600, height: 600)
             return (try? await generator.image(at: .zero)).map { UIImage(cgImage: $0.image) }
         }
-        guard let source = CGImageSourceCreateWithURL(item.url as CFURL, nil), let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 800, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary) else { return nil }
+        guard let source = CGImageSourceCreateWithURL(item.url as CFURL, nil), let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: maxPixelSize, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary) else { return nil }
         return UIImage(cgImage: image)
     }
     static func failure(_ text: String) -> NSError { NSError(domain: "Snappi", code: 1, userInfo: [NSLocalizedDescriptionKey: text]) }
