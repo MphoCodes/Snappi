@@ -47,7 +47,7 @@ Development installs require periodic signing renewal; the lifetime depends on y
 
 ## Simulator package
 
-Build a zipped simulator app with Xcode 27.2 or later:
+Download the [simulator developer preview](https://github.com/MphoCodes/Snappi/releases/tag/v1.1.0-preview.3), or build a zipped simulator app with Xcode 27.2 or later:
 
 ```sh
 ./scripts/package-simulator.sh

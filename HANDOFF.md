@@ -39,3 +39,5 @@ Code style: prefer clear names and small functions; keep comments only for non-o
 ## Portfolio packaging — 16 November 2026
 
 Added a media-check GitHub Actions workflow and `scripts/package-simulator.sh`, which builds a Release simulator app ZIP and SHA-256 checksum with Xcode 27.2. README distinguishes simulator packages from iPhone signing and documents what CI covers. This change does not alter camera behavior or install a new build on a phone.
+
+Verified image/video/architecture checks, Release simulator build, install and launch. Media CI passed on GitHub. Simulator ZIP and checksum published as `v1.1.0-preview.3`; this is not an iPhone distribution.
