@@ -13,3 +13,5 @@ xcuserdata/
 *.xcarchive
 *.ipa
 Local.xcconfig
+
+dist/

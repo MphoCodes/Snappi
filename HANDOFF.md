@@ -35,3 +35,7 @@ Review exposed a permission-pending reservation race; a regression test reproduc
 Refactor verification: architecture checks, image/video pipeline checks, complete-concurrency simulator build and signed generic iOS build passed. The only app-build warning was the informational AppIntents metadata skip. Independent review confirmed the reservation fix and found no further concrete blocker. Build 3 was not installed because the development phone was unavailable.
 
 Code style: prefer clear names and small functions; keep comments only for non-obvious constraints such as concurrency, gesture ownership and media preservation. Redundant narration was removed on 16 November 2026 without changing executable code.
+
+## Portfolio packaging — 16 November 2026
+
+Added a media-check GitHub Actions workflow and `scripts/package-simulator.sh`, which builds a Release simulator app ZIP and SHA-256 checksum with Xcode 27.2. README distinguishes simulator packages from iPhone signing and documents what CI covers. This change does not alter camera behavior or install a new build on a phone.

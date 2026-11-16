@@ -6,7 +6,7 @@
 
 Shoot, explore a look, and keep the moment. Snappi pairs six film-inspired treatments with tactile camera controls and a swipeable roll. Built with SwiftUI, AVFoundation and Core Image. Processing happens on your iPhone—no accounts, ads, subscriptions or cloud uploads.
 
-[MIT license](LICENSE) · iOS 17+ · Swift
+[MIT license](LICENSE) · iOS 17+ · Swift · [Media checks](https://github.com/MphoCodes/Snappi/actions/workflows/checks.yml)
 
 ## What you can do
 
@@ -45,6 +45,19 @@ xcodebuild -project Snappi.xcodeproj -scheme Snappi -configuration Debug \
 
 Development installs require periodic signing renewal; the lifetime depends on your Apple account and provisioning profile. Update in place to preserve local captures rather than uninstalling.
 
+## Simulator package
+
+Build a zipped simulator app with Xcode 27.2 or later:
+
+```sh
+./scripts/package-simulator.sh
+unzip -q dist/Snappi-simulator.zip -d dist
+xcrun simctl install booted dist/Snappi.app
+xcrun simctl launch booted com.mphocodes.snappi
+```
+
+The script produces `dist/Snappi-simulator.zip` and a SHA-256 checksum. This package is for the iOS Simulator on a Mac; it does not install on an iPhone or provide a real camera. Use photo import to explore the interface, and a physical device to verify camera and microphone behavior. An iPhone distribution still requires an appropriately signed build through Xcode, TestFlight or the App Store.
+
 ## Your photos stay yours
 
 Camera permission is required for capture. Microphone permission is requested for video; without it, video is silent. Photos add-only permission is optional: captures stay in Snappi even if export is denied. There are no third-party services or analytics in the app.
@@ -59,7 +72,7 @@ This is an early native camera app. Capture is portrait-only and uses the front/
 
 ## Development and checks
 
-Run the image and synthetic video checks on macOS:
+GitHub Actions runs image and synthetic video checks on pushes and pull requests. It does not currently build the Xcode 27.2 project or exercise camera hardware. Run the same checks locally on macOS:
 
 ```sh
 ./Tests/run.sh
