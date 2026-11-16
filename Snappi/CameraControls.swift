@@ -23,7 +23,6 @@ extension FilmLook {
     }
 }
 
-/// One small press response, shared by the camera controls. Never delays the action.
 struct CameraPressStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

@@ -10,7 +10,6 @@ final class CameraCaptureService: NSObject, CameraCapturing, AVCaptureVideoDataO
     private let permissions: any CameraPermissions
     // Queue confinement: session/input/capture state on queue; frame timing on frames;
     // effect options under lock; callbacks are delivered only on the main actor.
-    // AVFoundation delegate/queue bridging is the sole unchecked Sendable boundary.
     private let session = AVCaptureSession()
     private let queue = DispatchQueue(label: "snappi.capture")
     private let frames = DispatchQueue(label: "snappi.preview", qos: .userInitiated)
@@ -237,8 +236,7 @@ final class CameraCaptureService: NSObject, CameraCapturing, AVCaptureVideoDataO
         let rendered = Effects.apply(frame, settings: settings)
         guard let image = context.createCGImage(rendered, from: rendered.extent) else { return }
         publish { $0.preview = UIImage(cgImage: image) }
-        // Tiny previews use the unfiltered frame, never a second filter over the active look.
-        // Throttled on the existing serial frame queue: no backlog and no per-frame SwiftUI filters.
+        // Use the unfiltered frame so previews do not apply the active look twice.
         if now - lastLookPreview > 2 {
             lastLookPreview = now
             let size = 128 / frame.extent.width

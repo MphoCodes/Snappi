@@ -75,7 +75,6 @@ struct MediaViewer: View {
                 TabView(selection: $selection) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { offset, item in
                         Group {
-                            // Keep only the current page and its neighbours decoded.
                             if abs(offset - index) <= 1 { MediaPage(item: item, active: selection == item.id, repository: model.repository) }
                             else { Color.black }
                         }.tag(item.id)
@@ -167,7 +166,6 @@ private struct MediaPage: View {
         .onDisappear { player?.pause(); player = nil }
     }
 }
-/// Native pinch, pan and double-tap; at 1× the parent pager handles horizontal swipes.
 private struct ZoomablePhoto: UIViewRepresentable {
     let image: UIImage
     let active: Bool

@@ -128,6 +128,5 @@ final class CameraViewModel: ObservableObject {
         guard !Task.isCancelled else { return }
         latestThumbnail = image
     }
-    /// Also useful to callers that must wait for durable completion before continuing.
     func waitForProcessing() async { await processingTask?.value }
 }

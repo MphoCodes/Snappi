@@ -1,6 +1,5 @@
 import Foundation
 
-/// The composition root is the only place that chooses concrete service implementations.
 @MainActor
 struct AppServices {
     let repository: any MediaRepository

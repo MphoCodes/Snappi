@@ -1,6 +1,5 @@
 import Foundation
 
-/// Hardware boundary. Calls may originate on the main actor; implementations serialize device work.
 protocol CameraCapturing: AnyObject, Sendable {
     @MainActor var onUpdate: ((CameraUpdate) -> Void)? { get set }
     @MainActor var onCapture: ((CapturedMedia) -> Void)? { get set }
