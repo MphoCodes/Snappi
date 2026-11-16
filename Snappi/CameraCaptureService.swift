@@ -4,27 +4,16 @@ import UIKit
 import CoreImage
 import Combine
 
-final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVCapturePhotoCaptureDelegate, AVCaptureFileOutputRecordingDelegate, @unchecked Sendable {
-    @Published var preview: UIImage?
-    @Published var lookPreviews: [FilmLook: UIImage] = [:]
-    @Published var photoCaptured = 0
-    @Published var ready = false
-    @Published var denied = false
-    @Published var busy = false
-    @Published var recording = false
-    @Published var status = "Getting the camera ready…"
-    @Published var error: String?
-    @Published var latest: URL?
-    @Published var audioEnabled = false
-    @Published var isFront = false
-    @Published var flashAvailable = false
-    @Published var recordingStarted: Date?
+final class CameraCaptureService: NSObject, CameraCapturing, AVCaptureVideoDataOutputSampleBufferDelegate, AVCapturePhotoCaptureDelegate, AVCaptureFileOutputRecordingDelegate, @unchecked Sendable {
+    @MainActor var onUpdate: ((CameraUpdate) -> Void)?
+    @MainActor var onCapture: ((CapturedMedia) -> Void)?
+    private let permissions: any CameraPermissions
     // Queue confinement: session/input/capture state on queue; frame timing on frames;
-    // effect options under lock; all Published values are mutated on the main queue.
+    // effect options under lock; callbacks are delivered only on the main actor.
+    // AVFoundation delegate/queue bridging is the sole unchecked Sendable boundary.
     private let session = AVCaptureSession()
     private let queue = DispatchQueue(label: "snappi.capture")
     private let frames = DispatchQueue(label: "snappi.preview", qos: .userInitiated)
-    private let processing = DispatchQueue(label: "snappi.processing", qos: .userInitiated)
     private let photo = AVCapturePhotoOutput()
     private let movie = AVCaptureMovieFileOutput()
     private let video = AVCaptureVideoDataOutput()
@@ -32,6 +21,7 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     private var configured = false
     private var active = true
     private var capturing = false
+    private var pendingVideoStart: UUID?
     private var options = LookSettings()
     private var shotOptions = LookSettings()
     private var keepOriginal = false
@@ -44,7 +34,8 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     private var lastLookPreview: CFAbsoluteTime = 0
     private var front = false
     private var observers: [NSObjectProtocol] = []
-    override init() {
+    init(permissions: any CameraPermissions) {
+        self.permissions = permissions
         super.init()
         observers.append(NotificationCenter.default.addObserver(forName: .AVCaptureSessionWasInterrupted, object: session, queue: nil) { [weak self] _ in
             self?.publish { $0.ready = false; $0.status = "Camera interrupted. Return to Snappi to continue." }
@@ -55,12 +46,18 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
         })
     }
     deinit { observers.forEach(NotificationCenter.default.removeObserver) }
-    private func publish(_ change: @escaping (CameraController) -> Void) { DispatchQueue.main.async { [weak self] in if let self { change(self) } } }
+    private func publish(_ change: @escaping CameraUpdate) {
+        DispatchQueue.main.async { [weak self] in self?.onUpdate?(change) }
+    }
+    private func deliver(_ media: CapturedMedia) {
+        DispatchQueue.main.async { [weak self] in self?.onCapture?(media) }
+    }
+    func finishCapture() { queue.async { self.capturing = false } }
     func update(settings: LookSettings, preserve: Bool, export: Bool) { lock.lock(); options = settings; keepOriginal = preserve; autoExport = export; lock.unlock() }
     private func snapshot() { lock.lock(); shotOptions = options; shotKeepOriginal = keepOriginal; shotAutoExport = autoExport; lock.unlock() }
     func start() {
         Task {
-            let access = await AVCaptureDevice.requestAccess(for: .video)
+            let access = await permissions.requestCamera()
             guard access else { publish { $0.denied = true; $0.status = "Camera access is off" }; return }
             queue.async { self.active = true; self.configure() }
         }
@@ -71,23 +68,23 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
         session.beginConfiguration()
         session.sessionPreset = .hd1920x1080
         do {
-            guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else { throw MediaLibrary.failure("No camera is available on this device.") }
+            guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else { throw SnappiFailure.make("No camera is available on this device.") }
             let deviceInput = try AVCaptureDeviceInput(device: camera)
-            guard session.canAddInput(deviceInput) else { throw MediaLibrary.failure("Could not connect the camera.") }
+            guard session.canAddInput(deviceInput) else { throw SnappiFailure.make("Could not connect the camera.") }
             session.addInput(deviceInput); input = deviceInput
             video.alwaysDiscardsLateVideoFrames = true
             video.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
             video.setSampleBufferDelegate(self, queue: frames)
             for output in [photo, movie, video] as [AVCaptureOutput] {
-                guard session.canAddOutput(output) else { throw MediaLibrary.failure("This device cannot run the required camera outputs.") }
+                guard session.canAddOutput(output) else { throw SnappiFailure.make("This device cannot run the required camera outputs.") }
                 session.addOutput(output)
             }
             movie.maxRecordedDuration = CMTime(seconds: 60, preferredTimescale: 600)
             orientConnections()
             session.commitConfiguration(); configured = true
             if active { session.startRunning() }
-            let running = active && session.isRunning
-            publish { $0.ready = running; $0.status = "Ready to capture"; $0.flashAvailable = camera.hasFlash }
+            let running = active && session.isRunning, hasFlash = camera.hasFlash
+            publish { $0.ready = running; $0.status = "Ready to capture"; $0.flashAvailable = hasFlash }
         } catch {
             session.inputs.forEach(session.removeInput); session.outputs.forEach(session.removeOutput)
             session.commitConfiguration(); publish { $0.error = error.localizedDescription; $0.status = "Camera unavailable" }
@@ -103,18 +100,22 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     }
     func resume() { queue.async {
         self.active = true
-        if AVCaptureDevice.authorizationStatus(for: .video) == .authorized { self.configure() }
-        else if AVCaptureDevice.authorizationStatus(for: .video) == .denied {
+        if self.permissions.cameraStatus == .authorized { self.configure() }
+        else if self.permissions.cameraStatus == .denied {
             self.publish { $0.denied = true; $0.ready = false; $0.status = "Camera access is off" }
         }
     } }
     private func resumeOnQueue() {
         if active && !session.isRunning { session.startRunning() }
         let running = session.isRunning, idle = !capturing
-        publish { $0.ready = running; if idle { $0.status = "Ready to capture" } }
+        publish { $0.ready = running; if idle && !$0.busy { $0.status = "Ready to capture" } }
     }
     func suspend() { queue.async {
         self.active = false
+        if self.pendingVideoStart != nil {
+            self.pendingVideoStart = nil; self.capturing = false
+            self.publish { $0.busy = false; $0.status = "Recording cancelled" }
+        }
         if self.movie.isRecording { self.movie.stopRecording() }
         self.torchOnQueue(false)
         if self.session.isRunning { self.session.stopRunning() }
@@ -152,7 +153,10 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
         catch { publish { $0.error = error.localizedDescription } }
     }
     func capturePhoto(flash: Bool) { queue.async {
-        guard self.configured, self.session.isRunning, !self.capturing else { return }
+        guard self.configured, self.session.isRunning, !self.capturing else {
+            if !self.capturing { self.publish { $0.busy = false; $0.status = "Camera unavailable" } }
+            return
+        }
         self.capturing = true; self.snapshot()
         self.publish { $0.busy = true; $0.status = "Developing your photo…" }
         let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
@@ -163,30 +167,43 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
         publish { $0.photoCaptured += 1 }
     }
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+        let capturedData = photo.fileDataRepresentation()
         queue.async {
             let settings = self.shotOptions, preserve = self.shotKeepOriginal, export = self.shotAutoExport
             if let error { self.finishFailure(error); return }
-            guard let data = photo.fileDataRepresentation() else { self.finishFailure(MediaLibrary.failure("No photo data was returned.")); return }
-            self.processing.async {
-                do { let url = try MediaLibrary.processPhoto(data, settings: settings, preserveOriginal: preserve); self.complete(url, export: export) }
-                catch { self.finishFailure(error) }
-            }
+            guard let data = capturedData else { self.finishFailure(SnappiFailure.make("No photo data was returned.")); return }
+            self.deliver(.photo(data, CaptureOptions(settings: settings, preserveOriginal: preserve, exportToPhotos: export)))
         }
     }
-    func startVideo() {
-        Task {
-            let mic = await AVCaptureDevice.requestAccess(for: .audio)
-            queue.async {
-                guard self.configured, self.session.isRunning, !self.capturing else { return }
-                self.capturing = true; self.snapshot()
-                if mic && !self.session.inputs.contains(where: { ($0 as? AVCaptureDeviceInput)?.device.hasMediaType(.audio) == true }), let device = AVCaptureDevice.default(for: .audio), let audio = try? AVCaptureDeviceInput(device: device) {
-                    self.session.beginConfiguration()
-                    if self.session.canAddInput(audio) { self.session.addInput(audio) }
-                    self.session.commitConfiguration()
+    func startVideo(to destination: URL) {
+        queue.async {
+            guard self.configured, self.session.isRunning, !self.capturing else {
+                if !self.capturing { self.publish { $0.busy = false; $0.status = "Camera unavailable" } }
+                return
+            }
+            self.capturing = true; self.snapshot()
+            let request = UUID()
+            self.pendingVideoStart = request
+            self.publish { $0.busy = true; $0.status = "Preparing recording…" }
+            Task {
+                let mic = await self.permissions.requestMicrophone()
+                self.queue.async {
+                    guard self.pendingVideoStart == request else { return }
+                    self.pendingVideoStart = nil
+                    guard self.active, self.session.isRunning else {
+                        self.capturing = false
+                        self.publish { $0.busy = false; $0.status = "Recording cancelled" }
+                        return
+                    }
+                    if mic && !self.session.inputs.contains(where: { ($0 as? AVCaptureDeviceInput)?.device.hasMediaType(.audio) == true }), let device = AVCaptureDevice.default(for: .audio), let audio = try? AVCaptureDeviceInput(device: device) {
+                        self.session.beginConfiguration()
+                        if self.session.canAddInput(audio) { self.session.addInput(audio) }
+                        self.session.commitConfiguration()
+                    }
+                    let hasAudio = self.session.inputs.contains { ($0 as? AVCaptureDeviceInput)?.device.hasMediaType(.audio) == true }
+                    self.publish { $0.audioEnabled = hasAudio; $0.status = hasAudio ? "Starting recording…" : "Starting silent recording…" }
+                    self.movie.startRecording(to: destination, recordingDelegate: self)
                 }
-                let hasAudio = self.session.inputs.contains { ($0 as? AVCaptureDeviceInput)?.device.hasMediaType(.audio) == true }
-                self.publish { $0.audioEnabled = hasAudio; $0.busy = true; $0.status = hasAudio ? "Starting recording…" : "Starting silent recording…" }
-                self.movie.startRecording(to: MediaLibrary.newURL(extension: "mov", original: true), recordingDelegate: self)
             }
         }
     }
@@ -202,39 +219,7 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
                 self.finishFailure(error); return
             }
             let settings = self.shotOptions, preserve = self.shotKeepOriginal, export = self.shotAutoExport
-            let stamp = settings.dateStamp ? MediaLibrary.stamp(date: Date()) : nil
-            Task {
-                let destination = MediaLibrary.newURL(extension: "mov")
-                do {
-                    try await VideoRenderer.export(source: source, destination: destination, settings: settings, stamp: stamp)
-                    if !preserve { try? FileManager.default.removeItem(at: source) }
-                    self.complete(destination, export: export)
-                } catch {
-                    try? FileManager.default.removeItem(at: destination)
-                    self.finishFailure(MediaLibrary.failure("Video processing failed. The original remains in Snappi’s library. \(error.localizedDescription)"))
-                }
-            }
-        }
-    }
-    func importPhoto(_ data: Data) {
-        queue.async {
-            guard !self.capturing else { return }; self.capturing = true; self.snapshot()
-            let settings = self.shotOptions, preserve = self.shotKeepOriginal, export = self.shotAutoExport
-            self.publish { $0.busy = true; $0.status = "Developing imported photo…" }
-            self.processing.async {
-                do { self.complete(try MediaLibrary.processPhoto(data, settings: settings, preserveOriginal: preserve), export: export) }
-                catch { self.finishFailure(error) }
-            }
-        }
-    }
-    private func complete(_ url: URL, export: Bool) {
-        publish { $0.latest = url; $0.status = "Saved in Snappi" }
-        Task {
-            var message: String?
-            if export { do { try await MediaLibrary.saveToPhotos(url) } catch { message = error.localizedDescription } }
-            let result = message
-            queue.async { self.capturing = false }
-            publish { $0.busy = false; $0.status = result == nil && export ? "Saved in Snappi + Photos" : "Saved in Snappi"; if let result { $0.error = result } }
+            self.deliver(.video(source, CaptureOptions(settings: settings, preserveOriginal: preserve, exportToPhotos: export)))
         }
     }
     private func finishFailure(_ error: Error) {

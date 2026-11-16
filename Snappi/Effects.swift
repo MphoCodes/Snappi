@@ -1,11 +1,11 @@
 import Foundation
 import CoreImage
 
-enum FilmLook: String, CaseIterable, Codable, Identifiable {
+enum FilmLook: String, CaseIterable, Codable, Identifiable, Sendable {
     case original = "Original", daylight = "Daylight", golden = "Golden", faded = "Faded", noir = "Noir", tape = "Tape"
     var id: String { rawValue }
 }
-struct LookSettings: Codable, Equatable {
+struct LookSettings: Codable, Equatable, Sendable {
     var look: FilmLook = .daylight
     var strength: Double = 0.8
     var grain: Double = 0.12

@@ -73,11 +73,19 @@ Device and simulator builds passed during development. Photo/video capture, audi
 | --- | --- |
 | `Snappi/Effects.swift` | Shared Core Image treatments |
 | `Snappi/VideoRenderer.swift` | Filtered video export |
-| `Snappi/CameraController.swift` | Queue-confined capture and preview |
-| `Snappi/MediaLibrary.swift` | Media files, image processing and Photos export |
+| `Snappi/CameraCaptureService.swift` | AVFoundation hardware adapter |
+| `Snappi/CameraViewModel.swift` | Main-actor capture, countdown and import workflows |
+| `Snappi/MediaRepository.swift` | Injectable media storage and thumbnail reads |
+| `Snappi/MediaProcessor.swift` | Actor-isolated photo/video processing |
+| `Snappi/PhotoLibraryExporter.swift` | Photos permission and export |
+| `Snappi/CameraPermissions.swift` | Injectable camera/microphone permission access |
+| `Snappi/AppServices.swift` | Composition root for live dependencies |
+| `Snappi/GalleryViewModel.swift` | Gallery export, listing and thumbnail state |
 | `Snappi/SnappiApp.swift` | Camera screen and settings |
 | `Snappi/CameraControls.swift` | Film previews, shutter and motion |
-| `Snappi/GalleryScreen.swift` | Paged viewer, zoom and playback lifecycle |
+| `Snappi/GalleryScreen.swift` | Paged viewer, zoom and playback presentation |
+
+See [Architecture](docs/ARCHITECTURE.md) for dependency boundaries, concurrency and persistence guarantees. With an iOS simulator booted, run `./Tests/run-architecture.sh` for workflow and storage failure checks. The hardware adapter retains a documented queue-confinement boundary; the refactor does not claim complete Swift 6 actor isolation for AVFoundation.
 
 ## Contributing
 

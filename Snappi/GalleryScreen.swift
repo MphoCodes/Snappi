@@ -3,7 +3,8 @@ import AVKit
 
 struct LibraryScreen: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var items: [CaptureItem] = []
+    @StateObject var model: GalleryViewModel
+    private var items: [CaptureItem] { model.items }
     @State private var selected: CaptureItem?
     var body: some View {
         NavigationStack {
@@ -19,22 +20,27 @@ struct LibraryScreen: View {
                 }
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 3), spacing: 4) {
                     ForEach(items) { item in
-                        Button { selected = item } label: { MediaTile(item: item, height: 156) }
+                        Button { selected = item } label: { MediaTile(item: item, repository: model.repository, height: 156) }
                             .buttonStyle(CameraPressStyle())
                             .accessibilityLabel("\(item.isVideo ? "Video" : "Photo"), \(item.date.formatted())")
                     }
                 }.padding(.horizontal, 5)
             }.background(navy).navigationTitle("Your roll")
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Camera") { dismiss() } } }
-                .onAppear { items = MediaLibrary.items() }
-                .fullScreenCover(item: $selected) { item in MediaViewer(items: items, initialID: item.id) }
+                .onAppear { model.reload() }
+                .fullScreenCover(item: $selected) { item in MediaViewer(items: items, initialID: item.id, model: model) }
         }.tint(turquoise)
     }
 }
 struct MediaTile: View {
     let item: CaptureItem
     var height: CGFloat = 64
-    @State private var image: UIImage?
+    @StateObject private var thumbnail: ThumbnailViewModel
+    private var image: UIImage? { thumbnail.image }
+    init(item: CaptureItem, repository: any MediaRepository, height: CGFloat = 64) {
+        self.item = item; self.height = height
+        _thumbnail = StateObject(wrappedValue: ThumbnailViewModel(item: item, repository: repository))
+    }
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .bottomLeading) {
@@ -46,7 +52,7 @@ struct MediaTile: View {
                 }.font(.system(size: 9, weight: .medium)).padding(5).shadow(color: .black, radius: 2)
             }
         }.frame(height: height).clipShape(RoundedRectangle(cornerRadius: 5))
-            .task(id: item.id) { image = await MediaLibrary.thumbnail(item) }
+            .task(id: item.id) { await thumbnail.load() }
     }
 }
 struct MediaViewer: View {
@@ -54,10 +60,10 @@ struct MediaViewer: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selection: String
-    @State private var message: String?
-    @State private var exporting = false
-    init(items: [CaptureItem], initialID: String) {
+    @ObservedObject var model: GalleryViewModel
+    init(items: [CaptureItem], initialID: String, model: GalleryViewModel) {
         self.items = items
+        self.model = model
         _selection = State(initialValue: initialID)
     }
     private var index: Int { items.firstIndex { $0.id == selection } ?? 0 }
@@ -70,7 +76,7 @@ struct MediaViewer: View {
                     ForEach(Array(items.enumerated()), id: \.element.id) { offset, item in
                         Group {
                             // Keep only the current page and its neighbours decoded.
-                            if abs(offset - index) <= 1 { MediaPage(item: item, active: selection == item.id) }
+                            if abs(offset - index) <= 1 { MediaPage(item: item, active: selection == item.id, repository: model.repository) }
                             else { Color.black }
                         }.tag(item.id)
                     }
@@ -94,7 +100,7 @@ struct MediaViewer: View {
                         LazyHStack(spacing: 6) {
                             ForEach(items) { item in
                                 Button { withAnimation(motion) { selection = item.id } } label: {
-                                    MediaTile(item: item).frame(width: 48)
+                                    MediaTile(item: item, repository: model.repository).frame(width: 48)
                                         .padding(3)
                                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(item.id == selection ? turquoise : .clear, lineWidth: 2))
                                         .opacity(item.id == selection ? 1 : 0.65)
@@ -112,25 +118,18 @@ struct MediaViewer: View {
                         ShareLink(item: current.url) { Label("Share", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity, minHeight: 48) }
                             .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
                         Button {
-                            // Capture the URL now; swiping while export runs must not change its target.
-                            let url = current.url, number = index + 1
-                            exporting = true
-                            Task {
-                                do { try await MediaLibrary.saveToPhotos(url); message = "Capture \(number) saved to Photos" }
-                                catch { message = error.localizedDescription }
-                                exporting = false
-                            }
+                            model.export(current, number: index + 1)
                         } label: {
-                            Label(exporting ? "Saving…" : "Save", systemImage: "square.and.arrow.down")
+                            Label(model.exporting ? "Saving…" : "Save", systemImage: "square.and.arrow.down")
                                 .frame(maxWidth: .infinity, minHeight: 48)
-                        }.disabled(exporting).background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+                        }.disabled(model.exporting).background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
                             .accessibilityLabel("Save current capture to Photos")
                     }.font(.subheadline.weight(.medium)).buttonStyle(CameraPressStyle()).padding(.horizontal, 18).padding(.bottom, 8)
                 }
             }.background(Color.black).navigationTitle("\(index + 1) of \(items.count)").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .topBarLeading) { Button { dismiss() } label: { Label("Your roll", systemImage: "chevron.left") } } }
                 .sensoryFeedback(.selection, trigger: selection)
-                .alert("Snappi", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) { Button("OK") { message = nil } } message: { Text(message ?? "") }
+                .alert("Snappi", isPresented: Binding(get: { model.message != nil }, set: { if !$0 { model.message = nil } })) { Button("OK") { model.message = nil } } message: { Text(model.message ?? "") }
         }.tint(turquoise).preferredColorScheme(.dark)
     }
     private func move(_ delta: Int) {
@@ -143,8 +142,13 @@ private struct MediaPage: View {
     let item: CaptureItem
     let active: Bool
     @Environment(\.scenePhase) private var phase
-    @State private var image: UIImage?
+    @StateObject private var thumbnail: ThumbnailViewModel
+    private var image: UIImage? { thumbnail.image }
     @State private var player: AVPlayer?
+    init(item: CaptureItem, active: Bool, repository: any MediaRepository) {
+        self.item = item; self.active = active
+        _thumbnail = StateObject(wrappedValue: ThumbnailViewModel(item: item, repository: repository))
+    }
     var body: some View {
         Group {
             if item.isVideo { VideoPlayer(player: player) }
@@ -156,8 +160,7 @@ private struct MediaPage: View {
                 player?.pause()
                 player = active ? AVPlayer(url: item.url) : nil
             } else if image == nil {
-                let result = await MediaLibrary.thumbnail(item, maxPixelSize: 2400)
-                if !Task.isCancelled { image = result }
+                await thumbnail.load(maxPixelSize: 2400)
             }
         }
         .onChange(of: phase) { _, value in if value != .active { player?.pause() } }

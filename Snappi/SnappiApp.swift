@@ -8,15 +8,21 @@ let turquoise = Color(red: 0.16, green: 0.83, blue: 0.82)
 
 @main
 struct SnappiApp: App {
-    var body: some Scene { WindowGroup { CameraScreen().preferredColorScheme(.dark) } }
+    private let services = AppServices.live()
+    var body: some Scene { WindowGroup { CameraScreen(services: services).preferredColorScheme(.dark) } }
 }
 struct CameraScreen: View {
-    @StateObject private var camera = CameraController()
+    @StateObject private var camera: CameraViewModel
+    private let services: AppServices
+    init(services: AppServices) {
+        self.services = services
+        _camera = StateObject(wrappedValue: services.cameraViewModel())
+    }
     @Environment(\.scenePhase) private var phase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var selection
-    @State private var latestThumbnail: UIImage?
-    @State private var rollCount = 0
+    private var latestThumbnail: UIImage? { camera.latestThumbnail }
+    private var rollCount: Int { camera.rollCount }
     @State private var savedPulse = false
     @AppStorage("look") private var selectedLook = FilmLook.daylight.rawValue
     @AppStorage("strength") private var strength = 0.8
@@ -31,8 +37,7 @@ struct CameraScreen: View {
     @State private var exposure = 0.0
     @State private var zoom = 1.0
     @State private var timerDelay = 0
-    @State private var countdown = 0
-    @State private var countdownTask: Task<Void, Never>?
+    private var countdown: Int { camera.countdown }
     @State private var showSettings = false
     @State private var showGallery = false
     @State private var showAdjustments = false
@@ -72,17 +77,14 @@ struct CameraScreen: View {
         .onChange(of: exportPhotos) { _, _ in sync() }
         .onChange(of: phase) { _, value in
             if value == .active { camera.resume() }
-            else if value == .background { countdownTask?.cancel(); countdown = 0; flash = false; camera.suspend() }
+            else if value == .background { flash = false; camera.suspend() }
         }
         .onChange(of: imported) { _, item in
             guard let item else { return }
-            Task {
-                do { guard let data = try await item.loadTransferable(type: Data.self) else { throw MediaLibrary.failure("The selected photo could not be imported.") }; camera.importPhoto(data) }
-                catch { camera.error = error.localizedDescription }
-                imported = nil
-            }
+            Task { await camera.importSelection(item); imported = nil }
         }
-        .sheet(isPresented: $showGallery) { LibraryScreen() }
+        .sheet(isPresented: $showGallery) { LibraryScreen(model: services.galleryViewModel()) }
+
         .sheet(isPresented: $showAdjustments) {
             NavigationStack {
                 Form {
@@ -310,12 +312,9 @@ struct CameraScreen: View {
         }.padding(.horizontal, 30).frame(height: 80)
     }
     @MainActor private func refreshRoll() async {
-        let items = MediaLibrary.items()
-        rollCount = items.count
-        guard let item = camera.latest.map({ CaptureItem(url: $0) }) ?? items.first else { return }
-        let thumbnail = await MediaLibrary.thumbnail(item)
+        await camera.refreshRoll()
         guard !Task.isCancelled else { return }
-        withAnimation(motion) { latestThumbnail = thumbnail; savedPulse = camera.latest != nil }
+        withAnimation(motion) { savedPulse = camera.latest != nil }
         if savedPulse {
             try? await Task.sleep(for: .milliseconds(950))
             withAnimation(motion) { savedPulse = false }
@@ -325,18 +324,8 @@ struct CameraScreen: View {
     private func sync() { camera.update(settings: settings, preserve: keepOriginal, export: exportPhotos) }
     private func openSettings() { if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) } }
     private func shutter() {
-        if camera.recording { camera.stopVideo(); flash = false; return }
-        countdownTask = Task { @MainActor in
-            if timerDelay > 0 {
-                for remaining in stride(from: timerDelay, through: 1, by: -1) {
-                    countdown = remaining
-                    do { try await Task.sleep(for: .seconds(1)) } catch { countdown = 0; return }
-                }
-                countdown = 0
-            }
-            guard !Task.isCancelled else { return }
-            if mode == "VIDEO" { camera.startVideo() } else { camera.capturePhoto(flash: flash) }
-        }
+        if camera.recording { flash = false }
+        camera.shutter(video: mode == "VIDEO", flash: flash, delay: timerDelay)
     }
 }
 struct GridOverlay: View {

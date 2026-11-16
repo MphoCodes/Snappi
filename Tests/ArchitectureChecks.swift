@@ -1,0 +1,99 @@
+import Foundation
+import UIKit
+
+// This fake is driven only by the main-actor test harness.
+final class FakeCamera: CameraCapturing, @unchecked Sendable {
+    @MainActor var onUpdate: ((CameraUpdate) -> Void)?
+    @MainActor var onCapture: ((CapturedMedia) -> Void)?
+    var captures = 0
+    var releases = 0
+    var videoStarts = 0
+    func update(settings: LookSettings, preserve: Bool, export: Bool) {}
+    func start() {}
+    func resume() {}
+    func suspend() {}
+    func switchCamera() {}
+    func exposure(_ value: Float) {}
+    func zoom(_ value: Double) {}
+    func torch(_ enabled: Bool) {}
+    func capturePhoto(flash: Bool) { captures += 1 }
+    func startVideo(to destination: URL) { videoStarts += 1 }
+    func stopVideo() {}
+    func finishCapture() { releases += 1 }
+}
+struct DeniedExporter: PhotoLibraryExporting {
+    func saveToPhotos(_ url: URL) async throws { throw SnappiFailure.make("Photos denied") }
+}
+struct UnusedExporter: PhotoLibraryExporting {
+    func saveToPhotos(_ url: URL) async throws { fatalError("Export must be skipped") }
+}
+struct FailingProcessedWrite: MediaRepository {
+    let base: LocalMediaRepository
+    func items() -> [CaptureItem] { base.items() }
+    func newURL(extension ext: String, original: Bool) -> URL { base.newURL(extension: ext, original: original) }
+    func write(_ data: Data, to url: URL) throws {
+        if url.lastPathComponent.hasPrefix("snappi-") { throw SnappiFailure.make("Disk full") }
+        try base.write(data, to: url)
+    }
+    func remove(_ url: URL) throws { try base.remove(url) }
+    func thumbnail(_ item: CaptureItem, maxPixelSize: Int) async -> UIImage? { await base.thumbnail(item, maxPixelSize: maxPixelSize) }
+}
+@main struct ArchitectureChecks {
+    @MainActor static func main() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let repository = LocalMediaRepository(directory: folder)
+        let processor = MediaProcessor(repository: repository)
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        let data = UIGraphicsImageRenderer(size: CGSize(width: 32, height: 48), format: format).image { context in
+            UIColor.red.setFill(); context.fill(CGRect(x: 0, y: 0, width: 32, height: 48))
+        }.jpegData(compressionQuality: 0.9)!
+        let camera = FakeCamera()
+        let vm = CameraViewModel(capture: camera, processor: processor, repository: repository, exporter: DeniedExporter())
+        camera.onUpdate? { $0.ready = true }
+        vm.shutter(video: true, flash: false, delay: 0)
+        precondition(vm.busy, "Reserve workflow before microphone authorization/hardware callback")
+        vm.shutter(video: false, flash: false, delay: 0)
+        await Task.yield()
+        precondition(camera.captures == 0 && camera.videoStarts == 1, "Pending video must block another capture")
+        camera.onUpdate? { $0.busy = false }
+        vm.shutter(video: false, flash: false, delay: 3)
+        vm.suspend()
+        try await Task.sleep(for: .milliseconds(30))
+        precondition(camera.captures == 0 && vm.countdown == 0, "Backgrounding must cancel countdown")
+        camera.onUpdate? { $0.busy = true }
+        camera.onCapture?(.photo(data, CaptureOptions(settings: LookSettings(), preserveOriginal: true, exportToPhotos: true)))
+        await vm.waitForProcessing()
+        precondition(vm.latest != nil && !vm.busy && vm.error == "Photos denied", "Denied export must leave the local capture available")
+        precondition(repository.items().count == 2, "Original and rendered photo must remain")
+        precondition(camera.releases == 1, "Capture must unlock even if Photos rejects export")
+        let originalCount = repository.items().count
+        camera.onUpdate? { $0.busy = true }
+        camera.onCapture?(.photo(Data([0, 1, 2]), CaptureOptions()))
+        await vm.waitForProcessing()
+        precondition(!vm.busy && vm.error != nil && camera.releases == 2, "Processing failure must unlock and surface an error")
+        precondition(repository.items().count == originalCount, "Failure must not remove existing media")
+        let url = try await processor.processPhoto(data, settings: LookSettings(), preserveOriginal: false)
+        precondition(FileManager.default.fileExists(atPath: url.path), "Processed file must exist")
+        precondition(repository.items().count == originalCount + 1, "Discard only the successful capture's original")
+        let failureStore = LocalMediaRepository(directory: folder.appendingPathComponent("failure"))
+        let failureProcessor = MediaProcessor(repository: FailingProcessedWrite(base: failureStore))
+        do {
+            _ = try await failureProcessor.processPhoto(data, settings: LookSettings(), preserveOriginal: false)
+            fatalError("Expected processed write to fail")
+        } catch {
+            precondition(failureStore.items().count == 1 && failureStore.items()[0].isOriginal,
+                         "A failed final write must retain the original even when keep-originals is off")
+            let preserved = try Data(contentsOf: failureStore.items()[0].url)
+            precondition(preserved == data)
+        }
+        let beforeQueue = repository.items().count, beforeReleases = camera.releases
+        camera.onCapture?(.photo(Data([0]), CaptureOptions()))
+        camera.onCapture?(.photo(data, CaptureOptions(settings: LookSettings(), preserveOriginal: false, exportToPhotos: false)))
+        await vm.waitForProcessing()
+        precondition(repository.items().count == beforeQueue + 1 && !vm.busy,
+                     "A failed delivery must not discard the following valid capture")
+        precondition(camera.releases == beforeReleases + 1, "Release hardware only after the queued work drains")
+        print("Architecture checks passed: countdown cancellation, local save on export denial, capture unlock, file preservation")
+    }
+}

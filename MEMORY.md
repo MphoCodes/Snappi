@@ -22,3 +22,11 @@ Image pipeline and synthetic video checks passed. Device/simulator builds passed
 See README for build steps, exact feature boundaries and installation requirements. Configure signing locally; never commit credentials, signing profiles, certificates or personal capture files. No knowledge-graph ingestion tool was available at publication; the portable files and shared Agent Memory carry current context, and no existing graph was replaced.
 
 Publication verified on 16 November 2026 using an unauthenticated GitHub API request: public visibility, MIT license, approved description and camera/iOS/Swift topics. The simulator build passed after removing the hard-coded signing team. Reachable Git history was scanned for credential-like content and signing file types; none were found.
+
+## Architecture separation — 16 November 2026
+
+Version 1.1 build 3 separates CameraCaptureService from main-actor CameraViewModel; AppServices injects MediaRepository, actor MediaProcessor, PhotoLibraryExporter and CameraPermissions. Gallery/thumbnail view models own listing, loads and export. Countdown/import/save workflows moved out of views. See docs/ARCHITECTURE.md. Captures directory, filenames and preference keys remain unchanged. Complete concurrency checks enabled; the AVFoundation adapter remains the documented unchecked Sendable boundary.
+
+Review exposed a permission-pending reservation race; a regression test reproduced it and the implementation now reserves synchronously, cancels stale video permission responses by request ID and queues captured media instead of dropping deliveries. Architecture tests cover denied export, failed processing, final-write original preservation and countdown cancellation. Existing device verification predates this refactor; repeat capture/audio and interruption checks on a connected phone.
+
+Refactor verification: architecture checks, image/video pipeline checks, complete-concurrency simulator build and signed generic iOS build passed. The only app-build warning was the informational AppIntents metadata skip. Independent review confirmed the reservation fix and found no further concrete blocker. Build 3 was not installed because the development phone was unavailable.
