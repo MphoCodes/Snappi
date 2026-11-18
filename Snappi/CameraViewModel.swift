@@ -123,7 +123,10 @@ final class CameraViewModel: ObservableObject {
     func refreshRoll() async {
         let items = repository.items()
         rollCount = items.count
-        guard let item = state.latest.map({ CaptureItem(url: $0) }) ?? items.first else { return }
+        guard let item = items.first(where: { $0.url == state.latest }) ?? items.first else {
+            latestThumbnail = nil
+            return
+        }
         let image = await repository.thumbnail(item)
         guard !Task.isCancelled else { return }
         latestThumbnail = image

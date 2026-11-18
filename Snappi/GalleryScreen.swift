@@ -4,33 +4,113 @@ import AVKit
 struct LibraryScreen: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject var model: GalleryViewModel
-    private var items: [CaptureItem] { model.items }
-    @State private var selected: CaptureItem?
+    @State private var filter = GalleryFilter.all
+    @State private var selecting = false
+    @State private var marked: Set<String> = []
+    @State private var opened: CaptureItem?
+    @State private var position: String?
+    @State private var confirmDelete = false
+    private var items: [CaptureItem] { model.captures(filter) }
+    private var groups: [(day: Date, captures: [CaptureItem])] {
+        Dictionary(grouping: items) { Calendar.current.startOfDay(for: $0.date) }
+            .sorted { $0.key > $1.key }.map { ($0.key, $0.value) }
+    }
     var body: some View {
         NavigationStack {
-            ScrollView {
-                if items.isEmpty {
-                    ContentUnavailableView("Your moments live here", systemImage: "photo.on.rectangle.angled", description: Text("Take a photo, record a clip, or import an image to get started."))
-                } else {
-                    HStack {
-                        Text("\(items.count) moments").font(.subheadline)
-                        Spacer()
-                        Text("Tap to open · swipe to explore").font(.caption)
-                    }.foregroundStyle(.secondary).padding(.horizontal, 16).padding(.vertical, 8)
-                }
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 3), spacing: 4) {
-                    ForEach(items) { item in
-                        Button { selected = item } label: { MediaTile(item: item, repository: model.repository, height: 156) }
-                            .buttonStyle(CameraPressStyle())
-                            .accessibilityLabel("\(item.isVideo ? "Video" : "Photo"), \(item.date.formatted())")
+            VStack(spacing: 0) {
+                HStack {
+                    Menu {
+                        Picker("Show", selection: $filter) {
+                            ForEach(GalleryFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        }
+                    } label: { Label(filter.rawValue, systemImage: "line.3.horizontal.decrease.circle") }
+                    Spacer()
+                    Text(selecting ? "\(marked.count) selected" : "\(items.count) moments")
+                        .foregroundStyle(.secondary)
+                }.padding()
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        if items.isEmpty {
+                            ContentUnavailableView(emptyTitle, systemImage: filter == .favorites ? "heart" : "photo.on.rectangle")
+                        }
+                        ForEach(groups, id: \.day) { group in
+                            VStack(alignment: .leading) {
+                                Text(group.day.formatted(date: .abbreviated, time: .omitted))
+                                    .font(.headline).padding(.horizontal, 10)
+                                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 3), spacing: 4) {
+                                    ForEach(group.captures) { item in
+                                        Button {
+                                            if selecting {
+                                                if !marked.insert(item.id).inserted { marked.remove(item.id) }
+                                            } else { position = item.id; opened = item }
+                                        } label: {
+                                            MediaTile(item: item, repository: model.repository, height: 136)
+                                                .overlay(alignment: .topTrailing) {
+                                                    if selecting || model.favorites.contains(item.id) {
+                                                        Image(systemName: selecting ? (marked.contains(item.id) ? "checkmark.circle.fill" : "circle") : "heart.fill")
+                                                            .padding(5).background(.black.opacity(0.55), in: Circle()).padding(4)
+                                                    }
+                                                }
+                                        }.buttonStyle(CameraPressStyle()).id(item.id)
+                                            .accessibilityLabel("\(item.isVideo ? "Video" : "Photo"), \(item.date.formatted())")
+                                            .accessibilityAddTraits(marked.contains(item.id) ? .isSelected : [])
+                                    }
+                                }
+                            }.padding(.horizontal, 4)
+                        }
                     }
-                }.padding(.horizontal, 5)
-            }.background(navy).navigationTitle("Your roll")
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Camera") { dismiss() } } }
-                .onAppear { model.reload() }
-                .fullScreenCover(item: $selected) { item in MediaViewer(items: items, initialID: item.id, model: model) }
+                    .fullScreenCover(item: $opened, onDismiss: {
+                        if let position { proxy.scrollTo(position, anchor: .center) }
+                    }) { item in
+                        MediaViewer(filter: filter, initialID: item.id, model: model, position: $position)
+                    }
+                }
+                if selecting && !marked.isEmpty {
+                    HStack {
+                        if filter == .deleted {
+                            Button("Restore") { relocateSelection() }
+                        } else {
+                            Button(marked.isSubset(of: model.favorites) ? "Unfavorite" : "Favorite") {
+                                model.toggleFavorites(marked); endSelection()
+                            }
+                            Spacer()
+                            Button("Delete", role: .destructive) { confirmDelete = true }
+                        }
+                    }.padding()
+                }
+            }
+            .background(navy).navigationTitle("Your roll")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Camera") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(selecting ? "Done" : "Select") { if selecting { endSelection() } else { selecting = true } }
+                        .disabled(items.isEmpty && !selecting)
+                }
+            }
+            .onAppear { model.reload() }
+            .onChange(of: filter) { endSelection() }
+            .confirmationDialog("Move \(marked.count) to Recently Deleted?", isPresented: $confirmDelete, titleVisibility: .visible) {
+                Button("Move to Recently Deleted", role: .destructive) { relocateSelection() }
+            }
+            .alert("Snappi", isPresented: Binding(get: { opened == nil && model.message != nil }, set: { if !$0 { model.message = nil } })) {
+                Button("OK") { model.message = nil }
+            } message: { Text(model.message ?? "") }
         }.tint(turquoise)
     }
+    private var emptyTitle: String {
+        switch filter {
+        case .all: return "Your roll is empty"
+        case .photos: return "No photos yet"
+        case .videos: return "No videos yet"
+        case .favorites: return "No favorites yet"
+        case .deleted: return "No deleted captures"
+        }
+    }
+    private func relocateSelection() {
+        model.relocate(items.filter { marked.contains($0.id) }, restoring: filter == .deleted)
+        endSelection()
+    }
+    private func endSelection() { selecting = false; marked.removeAll() }
 }
 struct MediaTile: View {
     let item: CaptureItem
@@ -56,13 +136,17 @@ struct MediaTile: View {
     }
 }
 struct MediaViewer: View {
-    let items: [CaptureItem]
+    let filter: GalleryFilter
+    private var items: [CaptureItem] { model.captures(filter) }
+    @Binding var position: String?
+    @State private var confirmDelete = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selection: String
     @ObservedObject var model: GalleryViewModel
-    init(items: [CaptureItem], initialID: String, model: GalleryViewModel) {
-        self.items = items
+    init(filter: GalleryFilter, initialID: String, model: GalleryViewModel, position: Binding<String?>) {
+        self.filter = filter
+        _position = position
         self.model = model
         _selection = State(initialValue: initialID)
     }
@@ -113,23 +197,43 @@ struct MediaViewer: View {
                         .onChange(of: selection) { _, value in withAnimation(motion) { proxy.scrollTo(value, anchor: .center) } }
                 }
                 if let current {
-                    HStack(spacing: 12) {
-                        ShareLink(item: current.url) { Label("Share", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity, minHeight: 48) }
-                            .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
-                        Button {
-                            model.export(current, number: index + 1)
-                        } label: {
-                            Label(model.exporting ? "Saving…" : "Save", systemImage: "square.and.arrow.down")
-                                .frame(maxWidth: .infinity, minHeight: 48)
-                        }.disabled(model.exporting).background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
-                            .accessibilityLabel("Save current capture to Photos")
-                    }.font(.subheadline.weight(.medium)).buttonStyle(CameraPressStyle()).padding(.horizontal, 18).padding(.bottom, 8)
+                    HStack {
+                        if filter == .deleted {
+                            Button("Restore") { changeCurrent { model.relocate([current], restoring: true) } }
+                        } else {
+                            Button { changeCurrent { model.toggleFavorites([current.id]) } } label: {
+                                action(model.favorites.contains(current.id) ? "Unfavorite" : "Favorite", model.favorites.contains(current.id) ? "heart.fill" : "heart")
+                            }
+                            ShareLink(item: current.url) { action("Share", "square.and.arrow.up") }
+                            Button { model.export(current, number: index + 1) } label: {
+                                action(model.exporting ? "Saving…" : "Save to Photos", "square.and.arrow.down")
+                            }.disabled(model.exporting)
+                            Button(role: .destructive) { confirmDelete = true } label: { action("Delete", "trash") }
+                        }
+                    }.padding(.horizontal, 8).padding(.bottom, 8)
+                    .confirmationDialog("Move to Recently Deleted?", isPresented: $confirmDelete, titleVisibility: .visible) {
+                        Button("Move to Recently Deleted", role: .destructive) {
+                            changeCurrent { model.relocate([current], restoring: false) }
+                        }
+                    }
                 }
             }.background(Color.black).navigationTitle("\(index + 1) of \(items.count)").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .topBarLeading) { Button { dismiss() } label: { Label("Your roll", systemImage: "chevron.left") } } }
+                .onChange(of: selection) { _, id in position = id }
                 .sensoryFeedback(.selection, trigger: selection)
                 .alert("Snappi", isPresented: Binding(get: { model.message != nil }, set: { if !$0 { model.message = nil } })) { Button("OK") { model.message = nil } } message: { Text(model.message ?? "") }
         }.tint(turquoise).preferredColorScheme(.dark)
+    }
+    private func action(_ title: String, _ icon: String) -> some View {
+        VStack { Image(systemName: icon); Text(title).font(.caption) }
+            .frame(maxWidth: .infinity, minHeight: 48)
+    }
+    private func changeCurrent(_ change: () -> Void) {
+        let previous = index
+        change()
+        guard !items.contains(where: { $0.id == selection }) else { return }
+        if items.isEmpty { position = nil; dismiss() }
+        else { selection = items[min(previous, items.count - 1)].id; position = selection }
     }
     private func move(_ delta: Int) {
         let next = index + delta

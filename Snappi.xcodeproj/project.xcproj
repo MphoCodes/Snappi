@@ -34,7 +34,7 @@
       "build-settings": {
         "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
         "CODE_SIGN_STYLE": "Automatic",
-        "CURRENT_PROJECT_VERSION": "3",
+        "CURRENT_PROJECT_VERSION": "4",
         "INFOPLIST_KEY_NSCameraUsageDescription": "Snappi uses your camera to capture photos and videos with film-inspired looks.",
         "INFOPLIST_KEY_NSMicrophoneUsageDescription": "Snappi records audio with your videos when you allow microphone access.",
         "INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription": "Save your Snappi photos and videos to your photo library.",

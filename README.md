@@ -15,6 +15,7 @@ Shoot, explore a look, and keep the moment. Snappi pairs six film-inspired treat
 - Tune effect strength, grain, warmth and camera exposure (−2 to +2 EV, clamped to device capabilities).
 - Use photo flash/video torch, a 3/10-second timer, composition grid, date stamp and 1×/2×/3× digital zoom.
 - Browse your roll full screen with swipe navigation, thumbnails, previous/next buttons and pinch/double-tap photo zoom.
+- Tap the heart to favorite a capture, or use Select to organize several at once. Restore deleted captures from Recently Deleted.
 - Import photos, play videos, share captures and optionally save to Apple Photos.
 - Keep original captures alongside processed versions.
 - Get haptic feedback, animated look selection, shutter feedback, recording progress and a saved-photo print animation. Decorative motion respects Reduce Motion.
@@ -47,7 +48,7 @@ Development installs require periodic signing renewal; the lifetime depends on y
 
 ## Simulator package
 
-Download the [simulator developer preview](https://github.com/MphoCodes/Snappi/releases/tag/v1.1.0-preview.3), or build a zipped simulator app with Xcode 27.2 or later:
+Download the [simulator developer preview](https://github.com/MphoCodes/Snappi/releases/tag/v1.1.0-preview.4), or build a zipped simulator app with Xcode 27.2 or later:
 
 ```sh
 ./scripts/package-simulator.sh
@@ -62,13 +63,15 @@ The script produces `dist/Snappi-simulator.zip` and a SHA-256 checksum. This pac
 
 Camera permission is required for capture. Microphone permission is requested for video; without it, video is silent. Photos add-only permission is optional: captures stay in Snappi even if export is denied. There are no third-party services or analytics in the app.
 
+Your Roll groups captures by day and filters photos, videos, favorites and Recently Deleted. Tap Select for bulk actions. Deleted captures stay in Recently Deleted until restored. Copies saved to Apple Photos are independent.
+
 Deleting Snappi deletes its local library. Export any photos and videos you want to keep first. Original movie files are retained if effect processing fails; background export is not guaranteed.
 
 The Original look bypasses preset colour treatment. Grain, warmth and date-stamp controls remain independent; turn them off for an untouched colour treatment. The live preview is downscaled and capped at 15 fps. Small film-strip previews refresh every two seconds; captured media is processed separately.
 
 ## Current limits
 
-This is an early native camera app. Capture is portrait-only and uses the front/rear wide cameras with digital zoom. Manual ISO/shutter, physical lens selection, RAW/Live Photos, double exposure, video import and gallery deletion are not implemented yet. The six looks are original treatments rather than calibrated reproductions of particular film stocks or cameras.
+This is an early native camera app. Capture is portrait-only and uses the front/rear wide cameras with digital zoom. Manual ISO/shutter, physical lens selection, RAW/Live Photos, double exposure and video import are not implemented yet. The six looks are original treatments rather than calibrated reproductions of particular film stocks or cameras.
 
 ## Development and checks
 

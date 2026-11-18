@@ -28,6 +28,7 @@ struct UnusedExporter: PhotoLibraryExporting {
     func saveToPhotos(_ url: URL) async throws { fatalError("Export must be skipped") }
 }
 struct FailingProcessedWrite: MediaRepository {
+    var directory: URL { base.directory }
     let base: LocalMediaRepository
     func items() -> [CaptureItem] { base.items() }
     func newURL(extension ext: String, original: Bool) -> URL { base.newURL(extension: ext, original: original) }
@@ -94,6 +95,21 @@ struct FailingProcessedWrite: MediaRepository {
         precondition(repository.items().count == beforeQueue + 1 && !vm.busy,
                      "A failed delivery must not discard the following valid capture")
         precondition(camera.releases == beforeReleases + 1, "Release hardware only after the queued work drains")
+        let gallery = GalleryViewModel(repository: repository, exporter: DeniedExporter())
+        gallery.reload()
+        let pair = Array(gallery.items.prefix(2))
+        precondition(pair.count == 2)
+        let ids = Set(pair.map(\.id))
+        gallery.toggleFavorites(ids)
+        gallery.relocate(pair, restoring: false)
+        let reopened = GalleryViewModel(repository: repository, exporter: DeniedExporter())
+        reopened.reload()
+        precondition(Set(reopened.deleted.map(\.id)) == ids && reopened.captures(.favorites).isEmpty)
+        reopened.relocate(reopened.deleted, restoring: true)
+        precondition(reopened.deleted.isEmpty && Set(reopened.captures(.favorites).map(\.id)) == ids)
+        reopened.toggleFavorites(ids)
+        precondition(reopened.favorites.isEmpty)
+        print("Gallery favorite, batch delete, reopen and restore checks passed")
         print("Architecture checks passed: countdown cancellation, local save on export denial, capture unlock, file preservation")
     }
 }

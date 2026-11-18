@@ -83,7 +83,7 @@ struct CameraScreen: View {
             guard let item else { return }
             Task { await camera.importSelection(item); imported = nil }
         }
-        .sheet(isPresented: $showGallery) { LibraryScreen(model: services.galleryViewModel()) }
+        .sheet(isPresented: $showGallery, onDismiss: { Task { await camera.refreshRoll() } }) { LibraryScreen(model: services.galleryViewModel()) }
 
         .sheet(isPresented: $showAdjustments) {
             NavigationStack {
