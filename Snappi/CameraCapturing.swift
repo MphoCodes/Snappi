@@ -8,6 +8,7 @@ protocol CameraCapturing: AnyObject, Sendable {
     func resume()
     func suspend()
     func switchCamera()
+    func focus(at point: CGPoint, bufferSize: CGSize, front: Bool, lock: Bool)
     func exposure(_ value: Float)
     func zoom(_ value: Double)
     func torch(_ enabled: Bool)

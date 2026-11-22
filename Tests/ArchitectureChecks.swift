@@ -13,7 +13,10 @@ final class FakeCamera: CameraCapturing, @unchecked Sendable {
     func resume() {}
     func suspend() {}
     func switchCamera() {}
-    func exposure(_ value: Float) {}
+    var lastFocus: (point: CGPoint, size: CGSize, front: Bool, lock: Bool)?
+    var lastExposure: Float?
+    func focus(at point: CGPoint, bufferSize: CGSize, front: Bool, lock: Bool) { lastFocus = (point, bufferSize, front, lock) }
+    func exposure(_ value: Float) { lastExposure = value }
     func zoom(_ value: Double) {}
     func torch(_ enabled: Bool) {}
     func capturePhoto(flash: Bool) { captures += 1 }
@@ -52,6 +55,25 @@ struct FailingProcessedWrite: MediaRepository {
         let camera = FakeCamera()
         let vm = CameraViewModel(capture: camera, processor: processor, repository: repository, exporter: DeniedExporter())
         camera.onUpdate? { $0.ready = true }
+        let geometry = PreviewGeometry(image: CGSize(width: 1080, height: 1920), view: CGSize(width: 400, height: 400))
+        precondition(geometry.unitPoint(CGPoint(x: 30, y: 200)) == nil)
+        let point = geometry.unitPoint(CGPoint(x: 143.75, y: 300))!
+        precondition(point == CGPoint(x: 0.25, y: 0.75))
+        precondition(ViewfinderDrag.direction(CGPoint(x: 50, y: 10)) == .look)
+        precondition(ViewfinderDrag.direction(CGPoint(x: 5, y: -50)) == .exposure)
+        precondition(ViewfinderDrag.direction(CGPoint(x: 26, y: 25)) == nil)
+        camera.onUpdate? { $0.previewBufferSize = CGSize(width: 1080, height: 1920); $0.isFront = true }
+        vm.focus(at: point, lock: true)
+        precondition(camera.lastFocus == nil, "Reject stale back-camera frames after a flip")
+        camera.onUpdate? { $0.previewIsFront = true; $0.exposureRange = -1...1 }
+        vm.focus(at: point, lock: true)
+        precondition(camera.lastFocus?.point == point && camera.lastFocus?.front == true && camera.lastFocus?.lock == true)
+        precondition(camera.lastFocus?.size == CGSize(width: 1080, height: 1920))
+        vm.focus(at: point, lock: false)
+        precondition(camera.lastFocus?.lock == false)
+        vm.exposure(3)
+        precondition(camera.lastExposure == 1 && vm.exposureBias == 1)
+        print("Viewfinder letterbox, gesture direction, camera flip, lock request and exposure range checks passed")
         vm.shutter(video: true, flash: false, delay: 0)
         precondition(vm.busy, "Reserve workflow before microphone authorization/hardware callback")
         vm.shutter(video: false, flash: false, delay: 0)
