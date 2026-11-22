@@ -127,7 +127,9 @@ struct CameraScreen: View {
     private var viewfinder: some View {
         ZStack {
             Color.black
-            if let preview = camera.preview {
+            if mode == "PAIR", let preview = camera.preview {
+                HalfFrameViewfinder(live: preview, first: camera.firstHalfFrame?.preview, grid: grid)
+            } else if let preview = camera.preview {
                 Image(uiImage: preview).resizable().scaledToFit()
                     .overlay { if grid { GridOverlay() } }
                     .accessibilityLabel("Live camera preview")
@@ -261,7 +263,7 @@ struct CameraScreen: View {
     }
     private var modeSelector: some View {
         HStack(spacing: 30) {
-            ForEach(["PHOTO", "VIDEO"], id: \.self) { item in
+            ForEach(["PHOTO", "PAIR", "VIDEO"], id: \.self) { item in
                 Button {
                     withAnimation(motion) { mode = item }; flash = false; camera.torch(false)
                 } label: {
@@ -273,7 +275,7 @@ struct CameraScreen: View {
                             if mode == item { Capsule().fill(turquoise).frame(width: 18, height: 3).matchedGeometryEffect(id: "mode", in: selection) }
                         }
                     }.frame(minWidth: 60, minHeight: 36)
-                }.buttonStyle(CameraPressStyle()).disabled(locked).accessibilityAddTraits(mode == item ? .isSelected : [])
+                }.buttonStyle(CameraPressStyle()).disabled(locked || camera.firstHalfFrame != nil).accessibilityAddTraits(mode == item ? .isSelected : [])
             }
         }.frame(height: 36)
     }
@@ -295,20 +297,29 @@ struct CameraScreen: View {
                     .overlay(alignment: .bottom) {
                         Text("ROLL").font(.system(size: 8, weight: .medium)).tracking(1.1).offset(y: 11)
                     }.padding(.bottom, 12)
-            }.buttonStyle(CameraPressStyle()).accessibilityLabel("Your roll, \(rollCount) captures").disabled(locked)
+            }.buttonStyle(CameraPressStyle()).accessibilityLabel("Your roll, \(rollCount) captures").disabled(locked || camera.firstHalfFrame != nil)
             Spacer()
             Button { shutter() } label: {
                 ShutterFace(video: mode == "VIDEO", recording: camera.recording, start: camera.recordingStarted)
             }.buttonStyle(CameraPressStyle(pressedScale: 0.93))
                 .disabled((!camera.ready || camera.busy) && !camera.recording || countdown > 0)
-                .accessibilityLabel(camera.recording ? "Stop recording" : mode == "VIDEO" ? "Record video" : "Take photo")
+                .accessibilityLabel(camera.recording ? "Stop recording" : mode == "VIDEO" ? "Record video" : mode == "PAIR" ? (camera.firstHalfFrame == nil ? "Take first frame" : "Take second frame") : "Take photo")
             Spacer()
-            PhotosPicker(selection: $imported, matching: .images) {
-                VStack(spacing: 7) {
-                    Image(systemName: "photo.badge.plus").font(.system(size: 22, weight: .light))
-                    Text("IMPORT").font(.system(size: 8, weight: .medium)).tracking(1.1)
-                }.foregroundStyle(.white.opacity(0.75)).frame(width: 64, height: 76)
-            }.buttonStyle(CameraPressStyle()).disabled(locked).accessibilityLabel("Import a photo")
+            if camera.firstHalfFrame != nil {
+                Button { Task { await camera.cancelPair() } } label: {
+                    VStack(spacing: 7) {
+                        Image(systemName: "xmark.circle").font(.system(size: 22, weight: .light))
+                        Text("CANCEL").font(.system(size: 8, weight: .medium)).tracking(1.1)
+                    }.frame(width: 64, height: 76)
+                }.buttonStyle(CameraPressStyle()).disabled(locked).accessibilityLabel("Cancel half-frame pair")
+            } else {
+                PhotosPicker(selection: $imported, matching: .images) {
+                    VStack(spacing: 7) {
+                        Image(systemName: "photo.badge.plus").font(.system(size: 22, weight: .light))
+                        Text("IMPORT").font(.system(size: 8, weight: .medium)).tracking(1.1)
+                    }.foregroundStyle(.white.opacity(0.75)).frame(width: 64, height: 76)
+                }.buttonStyle(CameraPressStyle()).disabled(locked).accessibilityLabel("Import a photo")
+            }
         }.padding(.horizontal, 30).frame(height: 80)
     }
     @MainActor private func refreshRoll() async {
@@ -325,7 +336,7 @@ struct CameraScreen: View {
     private func openSettings() { if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) } }
     private func shutter() {
         if camera.recording { flash = false }
-        camera.shutter(video: mode == "VIDEO", flash: flash, delay: timerDelay)
+        camera.shutter(video: mode == "VIDEO", flash: flash, delay: timerDelay, pair: mode == "PAIR")
     }
 }
 struct GridOverlay: View {

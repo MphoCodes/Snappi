@@ -11,6 +11,8 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var countdown = 0
     @Published private(set) var rollCount = 0
     @Published private(set) var latestThumbnail: UIImage?
+    @Published private(set) var firstHalfFrame: HalfFrame?
+    private var capturingHalfFrame = false
     private let capture: any CameraCapturing
     private let processor: any MediaProcessing
     private let repository: any MediaRepository
@@ -29,7 +31,12 @@ final class CameraViewModel: ObservableObject {
             guard let self else { return }
             update(&self.state)
         }
-        capture.onCapture = { [weak self] media in self?.process(media) }
+        capture.onCapture = { [weak self] media in
+            guard let self else { return }
+            let pair = self.capturingHalfFrame
+            self.capturingHalfFrame = false
+            self.process(media, pair: pair)
+        }
     }
     subscript<Value>(dynamicMember keyPath: WritableKeyPath<CameraState, Value>) -> Value {
         get { state[keyPath: keyPath] }
@@ -50,9 +57,9 @@ final class CameraViewModel: ObservableObject {
     func exposure(_ value: Float) { capture.exposure(value) }
     func zoom(_ value: Double) { capture.zoom(value) }
     func torch(_ enabled: Bool) { capture.torch(enabled) }
-    func shutter(video: Bool, flash: Bool, delay: Int) {
+    func shutter(video: Bool, flash: Bool, delay: Int, pair: Bool = false) {
         if state.recording { capture.stopVideo(); return }
-        guard state.ready, !state.busy, countdownTask == nil else { return }
+        guard state.ready, !state.busy, countdownTask == nil, firstHalfFrame == nil || pair else { return }
         state.busy = true
         let request = UUID()
         countdownID = request
@@ -69,12 +76,22 @@ final class CameraViewModel: ObservableObject {
                 }
             }
             guard !Task.isCancelled else { return }
+            self.capturingHalfFrame = pair && !video
             if video { self.capture.startVideo(to: self.repository.newURL(extension: "mov", original: true)) }
             else { self.capture.capturePhoto(flash: flash) }
         }
     }
+    func cancelPair() async {
+        guard !state.busy, let frame = firstHalfFrame else { return }
+        do {
+            if !frame.options.preserveOriginal { try repository.remove(frame.original) }
+            firstHalfFrame = nil
+            state.status = "Pair cancelled"
+            await refreshRoll()
+        } catch { fail(error) }
+    }
     func importSelection(_ item: PhotosPickerItem) async {
-        guard !state.busy, countdownTask == nil else { return }
+        guard !state.busy, countdownTask == nil, firstHalfFrame == nil else { return }
         let selectedOptions = options
         state.busy = true
         state.status = "Developing imported photo…"
@@ -85,7 +102,7 @@ final class CameraViewModel: ObservableObject {
             process(.photo(data, selectedOptions))
         } catch { state.busy = false; fail(error) }
     }
-    private func process(_ media: CapturedMedia) {
+    private func process(_ media: CapturedMedia, pair: Bool = false) {
         let preceding = processingTask
         let request = UUID()
         processingID = request
@@ -99,7 +116,19 @@ final class CameraViewModel: ObservableObject {
             }
             do {
                 let url: URL, export: Bool
+                var disposableOriginals: [URL] = []
                 switch media {
+                case let .photo(data, options) where pair:
+                    guard let first = firstHalfFrame else {
+                        firstHalfFrame = try await processor.beginPair(data, options: options)
+                        state.status = "First frame ready. Take the second photo."
+                        return
+                    }
+                    firstHalfFrame = nil
+                    let result = try await processor.finishPair(first, second: data, options: options)
+                    url = result.image
+                    disposableOriginals = result.disposableOriginals
+                    export = options.exportToPhotos
                 case let .photo(data, options):
                     export = options.exportToPhotos
                     url = try await processor.processPhoto(data, settings: options.settings, preserveOriginal: options.preserveOriginal)
@@ -107,13 +136,19 @@ final class CameraViewModel: ObservableObject {
                     export = options.exportToPhotos
                     url = try await processor.processVideo(source, settings: options.settings, preserveOriginal: options.preserveOriginal)
                 }
-                state.latest = url
+                // For pairs, publish the new roll item after its temporary originals are settled.
+                if disposableOriginals.isEmpty { state.latest = url }
+                defer { if !disposableOriginals.isEmpty { state.latest = url } }
                 state.status = "Saved in Snappi"
                 if export {
                     do { try await exporter.saveToPhotos(url); state.status = "Saved in Snappi + Photos" }
-                    catch { state.error = error.localizedDescription }
+                    catch { state.error = error.localizedDescription; return }
                 }
-            } catch { fail(error) }
+                for original in disposableOriginals { try? repository.remove(original) }
+            } catch {
+                fail(error)
+                if pair { await refreshRoll() }
+            }
         }
     }
     private func fail(_ error: Error) {
