@@ -34,7 +34,8 @@ struct CameraScreen: View {
     @AppStorage("grid") private var grid = false
     @State private var mode = "PHOTO"
     @State private var flash = false
-    @State private var exposure = 0.0
+    @State private var adjustingExposure = false
+    @State private var visibleFocusID: UUID?
     @State private var zoom = 1.0
     @State private var timerDelay = 0
     private var countdown: Int { camera.countdown }
@@ -93,8 +94,14 @@ struct CameraScreen: View {
                         control("Film grain", value: $grain, range: 0...1)
                         control("Warmth", value: $warmth, range: -1...1)
                     }
-                    Section { Slider(value: $exposure, in: -2...2).onChange(of: exposure) { _, value in camera.exposure(Float(value)) }; Text("Exposure \(exposure, specifier: "%+.1f") EV").font(.caption).monospacedDigit() } header: { Text("Camera exposure") }
-                    Button("Reset adjustments") { strength = 0.8; grain = 0.12; warmth = 0; exposure = 0; camera.exposure(0) }
+                    Section("Camera exposure") {
+                        if camera.exposureRange.lowerBound < camera.exposureRange.upperBound {
+                            Slider(value: Binding(get: { camera.exposureBias }, set: { camera.exposure($0) }), in: camera.exposureRange)
+                                .accessibilityLabel("Camera exposure")
+                        }
+                        Text("Exposure \(camera.exposureBias, specifier: "%+.1f") EV").font(.caption).monospacedDigit()
+                    }
+                    Button("Reset adjustments") { strength = 0.8; grain = 0.12; warmth = 0; camera.exposure(0) }
                 }.navigationTitle("Make it yours").toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showAdjustments = false } } }
             }.presentationDetents([.medium, .large]).tint(turquoise)
         }
@@ -128,11 +135,16 @@ struct CameraScreen: View {
         ZStack {
             Color.black
             if mode == "PAIR", let preview = camera.preview {
-                HalfFrameViewfinder(live: preview, first: camera.firstHalfFrame?.preview, grid: grid)
+                HalfFrameViewfinder(live: preview, first: camera.firstHalfFrame?.preview, grid: grid) {
+                    focusReticle
+                    focusInteraction
+                }
             } else if let preview = camera.preview {
                 Image(uiImage: preview).resizable().scaledToFit()
                     .overlay { if grid { GridOverlay() } }
-                    .accessibilityLabel("Live camera preview")
+                    .overlay { focusReticle }
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             } else {
                 VStack(spacing: 14) {
                     Image(systemName: "camera.aperture").font(.system(size: 38, weight: .ultraLight))
@@ -140,6 +152,9 @@ struct CameraScreen: View {
                     Text(camera.status).font(.subheadline).multilineTextAlignment(.center)
                     if camera.denied { Button("Open Settings") { openSettings() }.buttonStyle(.bordered) }
                 }.padding(40)
+            }
+            if !camera.denied && mode != "PAIR" {
+                focusInteraction
             }
             VStack {
                 HStack(spacing: 4) {
@@ -157,7 +172,7 @@ struct CameraScreen: View {
                         }.frame(width: 70, height: 52)
                     }.disabled(locked).accessibilityLabel("Timer \(timerDelay) seconds")
                     Spacer()
-                    Button { camera.switchCamera(); zoom = 1; exposure = 0; flash = false } label: {
+                    Button { camera.switchCamera(); zoom = 1; flash = false } label: {
                         VStack(spacing: 5) {
                             Image(systemName: "arrow.triangle.2.circlepath.camera")
                                 .rotationEffect(.degrees(camera.isFront && !reduceMotion ? 180 : 0))
@@ -173,11 +188,17 @@ struct CameraScreen: View {
                 HStack(alignment: .bottom) {
                     VStack(alignment: .leading, spacing: 5) {
                         Text(settings.look.rawValue.uppercased()).font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(1.8)
+                        if let label = camera.focusSelection?.lockLabel {
+                            Label(label, systemImage: "lock.fill").font(.caption2).foregroundStyle(turquoise)
+                        }
+                        if adjustingExposure || camera.exposureBias != 0 {
+                            Text("\(camera.exposureBias, specifier: "%+.1f") EV").font(.caption2.monospacedDigit())
+                        }
                         if dateStamp {
                             Text(Date.now.formatted(.dateTime.year(.twoDigits).month(.twoDigits).day(.twoDigits)))
                                 .font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(.orange)
                         }
-                    }.padding(10).background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 7))
+                    }.padding(10).background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 7)).allowsHitTesting(false)
                     Spacer()
                     Button { zoom = zoom == 1 ? 2 : (zoom == 2 ? 3 : 1); camera.zoom(zoom) } label: {
                         Text("\(Int(zoom))× Zoom").font(.system(size: 12, weight: .semibold)).contentTransition(.numericText())
@@ -222,14 +243,46 @@ struct CameraScreen: View {
                     .allowsHitTesting(false)
             }
         }
-        .gesture(DragGesture(minimumDistance: 35).onEnded { value in
-            guard !locked, abs(value.translation.width) > abs(value.translation.height) * 1.3 else { return }
-            let looks = FilmLook.allCases
-            guard let current = looks.firstIndex(of: settings.look) else { return }
-            let next = min(max(current + (value.translation.width < 0 ? 1 : -1), 0), looks.count - 1)
-            withAnimation(motion) { selectedLook = looks[next].rawValue }
-        })
+        .task(id: camera.focusSelection?.id) {
+            visibleFocusID = camera.focusSelection?.id
+            guard camera.focusSelection?.lockLabel == nil else { return }
+            do { try await Task.sleep(for: .seconds(1.5)); visibleFocusID = nil } catch {}
+        }
         .animation(motion, value: camera.recording)
+    }
+    private var focusInteraction: some View {
+                ViewfinderInteraction(imageSize: camera.preview?.size ?? .zero, exposure: camera.exposureBias,
+                                      canMeter: camera.ready && !locked && camera.previewIsFront == camera.isFront,
+                                      onFocus: { camera.focus(at: $0, lock: $1) }, onExposure: camera.exposure,
+                                      onLook: swipeLook, onAdjusting: { adjustingExposure = $0 })
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Live camera preview")
+                    .accessibilityValue(camera.focusSelection?.lockLabel ?? "")
+                    .accessibilityAction(named: "Focus in center") { camera.focus(at: CGPoint(x: 0.5, y: 0.5), lock: false) }
+                    .accessibilityAction(named: "Lock focus and exposure in center") { camera.focus(at: CGPoint(x: 0.5, y: 0.5), lock: true) }
+                    .accessibilityAdjustableAction { direction in
+                        if direction == .increment { camera.exposure(camera.exposureBias + 0.25) }
+                        if direction == .decrement { camera.exposure(camera.exposureBias - 0.25) }
+                    }
+    }
+    private var focusReticle: some View {
+        GeometryReader { geometry in
+            if let focus = camera.focusSelection, focus.id == visibleFocusID {
+                RoundedRectangle(cornerRadius: 5)
+                    .stroke(turquoise, lineWidth: 2)
+                    .frame(width: 42, height: 42)
+                    .shadow(color: .black.opacity(0.7), radius: 2)
+                    .position(x: focus.point.x * geometry.size.width, y: focus.point.y * geometry.size.height)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+    private func swipeLook(_ distance: CGFloat) {
+        guard !locked else { return }
+        let looks = FilmLook.allCases
+        guard let current = looks.firstIndex(of: settings.look) else { return }
+        let next = min(max(current + (distance < 0 ? 1 : -1), 0), looks.count - 1)
+        withAnimation(motion) { selectedLook = looks[next].rawValue }
     }
     private var filmTray: some View {
         VStack(spacing: 8) {

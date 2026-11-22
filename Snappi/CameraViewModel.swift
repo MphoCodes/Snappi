@@ -54,7 +54,19 @@ final class CameraViewModel: ObservableObject {
         capture.suspend()
     }
     func switchCamera() { capture.switchCamera() }
-    func exposure(_ value: Float) { capture.exposure(value) }
+    func focus(at point: CGPoint, lock: Bool) {
+        guard state.ready, !state.busy, state.previewIsFront == state.isFront,
+              state.previewBufferSize.width > 0, state.previewBufferSize.height > 0 else { return }
+        capture.focus(at: point, bufferSize: state.previewBufferSize, front: state.isFront, lock: lock)
+    }
+    func exposure(_ value: Double) {
+        guard state.ready, !state.busy else { return }
+        let range = state.exposureRange
+        let clamped = min(max(value, range.lowerBound), range.upperBound)
+        guard clamped != state.exposureBias else { return }
+        state.exposureBias = clamped
+        capture.exposure(Float(clamped))
+    }
     func zoom(_ value: Double) { capture.zoom(value) }
     func torch(_ enabled: Bool) { capture.torch(enabled) }
     func shutter(video: Bool, flash: Bool, delay: Int, pair: Bool = false) {

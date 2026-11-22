@@ -80,6 +80,7 @@ final class CameraCaptureService: NSObject, CameraCapturing, AVCaptureVideoDataO
             }
             movie.maxRecordedDuration = CMTime(seconds: 60, preferredTimescale: 600)
             orientConnections()
+            publishMeteringState(camera)
             session.commitConfiguration(); configured = true
             if active { session.startRunning() }
             let running = active && session.isRunning, hasFlash = camera.hasFlash
@@ -128,17 +129,61 @@ final class CameraCaptureService: NSObject, CameraCapturing, AVCaptureVideoDataO
             let next = try AVCaptureDeviceInput(device: device)
             self.session.beginConfiguration(); self.session.removeInput(old)
             if self.session.canAddInput(next) {
+                self.resetMetering(old.device)
                 self.session.addInput(next); self.input = next; self.front.toggle(); self.orientConnections()
+                self.publishMeteringState(device)
             } else { self.session.addInput(old) }
             self.session.commitConfiguration()
             let front = self.front, hasFlash = self.input?.device.hasFlash ?? false
             self.publish { $0.isFront = front; $0.flashAvailable = hasFlash }
         } catch { self.publish { $0.error = error.localizedDescription } }
     } }
+    private func publishMeteringState(_ device: AVCaptureDevice) {
+        let range = max(-2, Double(device.minExposureTargetBias))...min(2, Double(device.maxExposureTargetBias))
+        let bias = Double(device.exposureTargetBias)
+        publish { $0.exposureRange = range; $0.exposureBias = bias; $0.focusSelection = nil }
+    }
+    private func resetMetering(_ device: AVCaptureDevice) {
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+            let center = CGPoint(x: 0.5, y: 0.5)
+            if device.isFocusPointOfInterestSupported { device.focusPointOfInterest = center }
+            if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
+            if device.isExposurePointOfInterestSupported { device.exposurePointOfInterest = center }
+            if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
+            device.setExposureTargetBias(0)
+        } catch { publish { $0.error = error.localizedDescription } }
+    }
+    func focus(at point: CGPoint, bufferSize: CGSize, front: Bool, lock: Bool) { queue.async {
+        guard self.active, self.session.isRunning, !self.capturing, self.front == front,
+              let device = self.input?.device else { return }
+        // This conversion uses the data output's actual rotation, mirroring and scaling.
+        let pixel = CGRect(x: point.x * (bufferSize.width - 1), y: point.y * (bufferSize.height - 1), width: 1, height: 1)
+        let rect = self.video.metadataOutputRectConverted(fromOutputRect: pixel)
+        guard !rect.isEmpty, rect.midX.isFinite, rect.midY.isFinite else { return }
+        let target = CGPoint(x: min(max(rect.midX, 0), 1), y: min(max(rect.midY, 0), 1))
+        let focusMode: AVCaptureDevice.FocusMode = lock ? .autoFocus : .continuousAutoFocus
+        let exposureMode: AVCaptureDevice.ExposureMode = lock ? .autoExpose : .continuousAutoExposure
+        let focus = device.isFocusPointOfInterestSupported && device.isFocusModeSupported(focusMode)
+        let exposure = device.isExposurePointOfInterestSupported && device.isExposureModeSupported(exposureMode)
+        guard focus || exposure else { return }
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+            if focus { device.focusPointOfInterest = target; device.focusMode = focusMode }
+            if exposure { device.exposurePointOfInterest = target; device.exposureMode = exposureMode }
+            let selection = FocusSelection(point: point, focusLocked: lock && focus, exposureLocked: lock && exposure)
+            self.publish { $0.focusSelection = selection }
+        } catch { self.publish { $0.error = error.localizedDescription } }
+    } }
     func exposure(_ value: Float) { queue.async {
         guard let device = self.input?.device else { return }
         do { try device.lockForConfiguration(); device.setExposureTargetBias(min(max(value, device.minExposureTargetBias), device.maxExposureTargetBias)); device.unlockForConfiguration() }
-        catch { self.publish { $0.error = error.localizedDescription } }
+        catch {
+            let actual = Double(device.exposureTargetBias)
+            self.publish { $0.exposureBias = actual; $0.error = error.localizedDescription }
+        }
     } }
     func zoom(_ value: Double) { queue.async {
         guard let device = self.input?.device else { return }
@@ -235,7 +280,13 @@ final class CameraCaptureService: NSObject, CameraCapturing, AVCaptureVideoDataO
         frame = frame.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         let rendered = Effects.apply(frame, settings: settings)
         guard let image = context.createCGImage(rendered, from: rendered.extent) else { return }
-        publish { $0.preview = UIImage(cgImage: image) }
+        let bufferSize = CGSize(width: CVPixelBufferGetWidth(buffer), height: CVPixelBufferGetHeight(buffer))
+        let front = connection.inputPorts.first?.sourceDevicePosition == .front
+        publish {
+            $0.preview = UIImage(cgImage: image)
+            $0.previewBufferSize = bufferSize
+            $0.previewIsFront = front
+        }
         // Use the unfiltered frame so previews do not apply the active look twice.
         if now - lastLookPreview > 2 {
             lastLookPreview = now

@@ -1,9 +1,10 @@
 import SwiftUI
 
-struct HalfFrameViewfinder: View {
+struct HalfFrameViewfinder<Interaction: View>: View {
     let live: UIImage
     let first: UIImage?
     let grid: Bool
+    @ViewBuilder let interaction: () -> Interaction
 
     var body: some View {
         GeometryReader { area in
@@ -21,7 +22,10 @@ struct HalfFrameViewfinder: View {
         ZStack(alignment: .topLeading) {
             Color.white.opacity(0.08)
             if let image {
-                Image(uiImage: image).resizable().scaledToFill()
+                let scale = max(size.width / image.size.width, size.height / image.size.height)
+                Image(uiImage: image).resizable()
+                    .frame(width: image.size.width * scale, height: image.size.height * scale)
+                    .overlay { if live { ZStack { interaction() } } }
                     .frame(width: size.width, height: size.height).clipped()
                     .overlay { if grid && live { GridOverlay() } }
             }
@@ -30,7 +34,7 @@ struct HalfFrameViewfinder: View {
                 .background(.black.opacity(0.65), in: Capsule()).padding(7)
         }
         .frame(width: size.width, height: size.height)
-        .accessibilityElement(children: .ignore)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("Frame \(number), \(live ? "live camera" : image == nil ? "waiting" : "captured")")
     }
 }

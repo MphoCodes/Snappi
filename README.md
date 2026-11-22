@@ -13,6 +13,7 @@ Shoot, explore a look, and keep the moment. Snappi pairs six film-inspired treat
 - Capture photos and videos with the front or rear wide camera.
 - Select **Pair** and press the shutter twice to create one landscape half-frame photo. The first shot stays on the left while you frame the second on the right. Tap **Cancel** between shots to start over.
 - Explore Original, Daylight, Golden, Faded, Noir and Tape with live previews. Swipe the viewfinder or tap the film strip to change looks.
+- Tap a subject in the preview to focus and meter. Hold to lock supported focus and exposure controls, and tap again to release. Swipe up or down for brightness, or sideways to change looks.
 - Tune effect strength, grain, warmth and camera exposure (−2 to +2 EV, clamped to device capabilities).
 - Use photo flash/video torch, a 3/10-second timer, composition grid, date stamp and 1×/2×/3× digital zoom.
 - Browse your roll full screen with swipe navigation, thumbnails, previous/next buttons and pinch/double-tap photo zoom.
