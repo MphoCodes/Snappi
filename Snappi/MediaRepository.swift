@@ -8,6 +8,10 @@ struct CaptureItem: Identifiable {
     var id: String { url.lastPathComponent }
     var isVideo: Bool { url.pathExtension == "mov" }
     var date: Date { (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast }
+    var allocatedBytes: Int64? {
+        let values = try? url.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .fileAllocatedSizeKey])
+        return (values?.totalFileAllocatedSize ?? values?.fileAllocatedSize).map(Int64.init)
+    }
     var isOriginal: Bool { url.lastPathComponent.hasPrefix("original-") }
 }
 protocol MediaRepository: Sendable {
@@ -22,10 +26,28 @@ extension MediaRepository {
     var deletedDirectory: URL { directory.appendingPathComponent("Recently Deleted", isDirectory: true) }
     var favoritesURL: URL { directory.appendingPathComponent("favorites.json") }
     func captures(in folder: URL) -> [CaptureItem] {
-        let urls = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.creationDateKey])) ?? []
-        return urls.filter { ["jpg", "mov"].contains($0.pathExtension) }
+        var keys: [URLResourceKey] = [.creationDateKey, .isRegularFileKey, .isSymbolicLinkKey]
+        if folder == deletedDirectory { keys += [.totalFileAllocatedSizeKey, .fileAllocatedSizeKey] }
+        let urls = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys)) ?? []
+        return urls.filter { isCaptureFile($0) }
             .map { CaptureItem(url: $0) }.sorted { $0.date > $1.date }
     }
+    private func isCaptureFile(_ url: URL) -> Bool {
+        guard ["jpg", "mov"].contains(url.pathExtension),
+              let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]) else { return false }
+        return values.isRegularFile == true && values.isSymbolicLink == false
+    }
+    func permanentlyDelete(_ item: CaptureItem) throws {
+        // Resolve the repository root first so a redirected trash directory cannot target live files.
+        let trash = directory.resolvingSymlinksInPath().appendingPathComponent(deletedDirectory.lastPathComponent)
+        let url = URL(fileURLWithPath: item.url.path)
+        guard url.resolvingSymlinksInPath().deletingLastPathComponent().path == trash.path,
+              isCaptureFile(url) else {
+            throw SnappiFailure.make("Only files in Recently Deleted can be permanently deleted.")
+        }
+        try remove(url)
+    }
+
     func relocate(_ item: CaptureItem, restoring: Bool) throws {
         let destination = restoring ? directory : deletedDirectory
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)

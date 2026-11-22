@@ -17,10 +17,13 @@ final class GalleryViewModel: ObservableObject {
         self.repository = repository; self.exporter = exporter
     }
     @Published private(set) var deleted: [CaptureItem] = []
+    @Published private(set) var deletedBytes: Int64? = 0
     @Published private(set) var favorites: Set<String> = []
     func reload() {
         items = repository.items()
         deleted = repository.captures(in: repository.deletedDirectory)
+        let sizes = deleted.compactMap(\.allocatedBytes)
+        deletedBytes = sizes.count == deleted.count ? sizes.reduce(0, +) : nil
         do { favorites = try readFavorites() }
         catch { message = error.localizedDescription }
     }
@@ -51,6 +54,29 @@ final class GalleryViewModel: ObservableObject {
         do {
             for item in captures { try repository.relocate(item, restoring: restoring) }
         } catch { message = error.localizedDescription }
+    }
+    func permanentlyDelete(_ ids: Set<String>) {
+        var removed: Set<String> = []
+        var errors: [String] = []
+        for item in deleted where ids.contains(item.id) {
+            do {
+                try repository.permanentlyDelete(item)
+                removed.insert(item.id)
+            } catch { errors.append(error.localizedDescription) }
+        }
+        do {
+            let stored = try readFavorites()
+            // A live capture can share a legacy filename with an item in the trash.
+            let obsolete = removed.filter { !FileManager.default.fileExists(atPath: repository.directory.appendingPathComponent($0).path) }
+            let updated = stored.subtracting(obsolete)
+            if updated != stored {
+                try repository.write(JSONEncoder().encode(updated), to: repository.favoritesURL)
+            }
+        } catch { errors.append("Favorites could not be updated. \(error.localizedDescription)") }
+        reload()
+        if !errors.isEmpty {
+            message = "Deleted \(removed.count) of \(ids.count). " + Array(Set(errors)).sorted().joined(separator: " ")
+        }
     }
     func export(_ item: CaptureItem, number: Int) {
         guard !exporting else { return }

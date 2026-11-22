@@ -10,6 +10,7 @@ struct LibraryScreen: View {
     @State private var opened: CaptureItem?
     @State private var position: String?
     @State private var confirmDelete = false
+    @State private var pendingPermanentDeletion: Set<String> = []
     private var items: [CaptureItem] { model.captures(filter) }
     private var groups: [(day: Date, captures: [CaptureItem])] {
         Dictionary(grouping: items) { Calendar.current.startOfDay(for: $0.date) }
@@ -28,6 +29,13 @@ struct LibraryScreen: View {
                     Text(selecting ? "\(marked.count) selected" : "\(items.count) moments")
                         .foregroundStyle(.secondary)
                 }.padding()
+                if filter == .deleted {
+                    let size = model.deletedBytes.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) }
+                    Text(size.map { "Storage used: \($0)" } ?? "Storage size unavailable")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal).padding(.bottom, 8)
+                }
                 ScrollViewReader { proxy in
                     ScrollView {
                         if items.isEmpty {
@@ -69,6 +77,8 @@ struct LibraryScreen: View {
                     HStack {
                         if filter == .deleted {
                             Button("Restore") { relocateSelection() }
+                            Spacer()
+                            Button("Delete Permanently", role: .destructive) { pendingPermanentDeletion = marked }
                         } else {
                             Button(marked.isSubset(of: model.favorites) ? "Unfavorite" : "Favorite") {
                                 model.toggleFavorites(marked); endSelection()
@@ -92,6 +102,11 @@ struct LibraryScreen: View {
             .confirmationDialog("Move \(marked.count) to Recently Deleted?", isPresented: $confirmDelete, titleVisibility: .visible) {
                 Button("Move to Recently Deleted", role: .destructive) { relocateSelection() }
             }
+            .permanentDeletionConfirmation(ids: $pendingPermanentDeletion) { ids in
+                model.permanentlyDelete(ids)
+                marked.formIntersection(model.deleted.map(\.id))
+                if marked.isEmpty { endSelection() }
+            }
             .alert("Snappi", isPresented: Binding(get: { opened == nil && model.message != nil }, set: { if !$0 { model.message = nil } })) {
                 Button("OK") { model.message = nil }
             } message: { Text(model.message ?? "") }
@@ -112,6 +127,22 @@ struct LibraryScreen: View {
     }
     private func endSelection() { selecting = false; marked.removeAll() }
 }
+private extension View {
+    func permanentDeletionConfirmation(ids: Binding<Set<String>>, delete: @escaping (Set<String>) -> Void) -> some View {
+        let selection = ids.wrappedValue
+        let captures = selection.count == 1 ? "1 capture" : "\(selection.count) captures"
+        return confirmationDialog("Permanently delete \(captures)?", isPresented: Binding(
+            get: { !ids.wrappedValue.isEmpty },
+            set: { if !$0 { ids.wrappedValue = [] } }
+        ), titleVisibility: .visible) {
+            Button("Delete Permanently", role: .destructive) { delete(selection) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You can’t undo this in Snappi. Copies saved to Apple Photos stay there.")
+        }
+    }
+}
+
 struct MediaTile: View {
     let item: CaptureItem
     var height: CGFloat = 64
@@ -142,6 +173,7 @@ struct MediaViewer: View {
     @State private var confirmDelete = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pendingPermanentDeletion: Set<String> = []
     @State private var selection: String
     @ObservedObject var model: GalleryViewModel
     init(filter: GalleryFilter, initialID: String, model: GalleryViewModel, position: Binding<String?>) {
@@ -200,6 +232,8 @@ struct MediaViewer: View {
                     HStack {
                         if filter == .deleted {
                             Button("Restore") { changeCurrent { model.relocate([current], restoring: true) } }
+                            Spacer()
+                            Button("Delete Permanently", role: .destructive) { pendingPermanentDeletion = [current.id] }
                         } else {
                             Button { changeCurrent { model.toggleFavorites([current.id]) } } label: {
                                 action(model.favorites.contains(current.id) ? "Unfavorite" : "Favorite", model.favorites.contains(current.id) ? "heart.fill" : "heart")
@@ -221,6 +255,9 @@ struct MediaViewer: View {
                 .toolbar { ToolbarItem(placement: .topBarLeading) { Button { dismiss() } label: { Label("Your roll", systemImage: "chevron.left") } } }
                 .onChange(of: selection) { _, id in position = id }
                 .sensoryFeedback(.selection, trigger: selection)
+                .permanentDeletionConfirmation(ids: $pendingPermanentDeletion) { ids in
+                    changeCurrent { model.permanentlyDelete(ids) }
+                }
                 .alert("Snappi", isPresented: Binding(get: { model.message != nil }, set: { if !$0 { model.message = nil } })) { Button("OK") { model.message = nil } } message: { Text(model.message ?? "") }
         }.tint(turquoise).preferredColorScheme(.dark)
     }

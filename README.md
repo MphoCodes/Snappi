@@ -63,7 +63,7 @@ The script produces `dist/Snappi-simulator.zip` and a SHA-256 checksum. This pac
 
 Camera permission is required for capture. Microphone permission is requested for video; without it, video is silent. Photos add-only permission is optional: captures stay in Snappi even if export is denied. There are no third-party services or analytics in the app.
 
-Your Roll groups captures by day and filters photos, videos, favorites and Recently Deleted. Tap Select for bulk actions. Deleted captures stay in Recently Deleted until restored. Copies saved to Apple Photos are independent.
+Your Roll groups captures by day and filters photos, videos, favorites and Recently Deleted. Tap Select for bulk actions. Recently Deleted shows the disk space used by its captures. Select captures to restore them or choose Delete Permanently and confirm to free their space. Copies saved to Apple Photos are independent.
 
 Deleting Snappi deletes its local library. Export any photos and videos you want to keep first. Original movie files are retained if effect processing fails; background export is not guaranteed.
 
