@@ -27,7 +27,7 @@ struct DeniedExporter: PhotoLibraryExporting {
 struct UnusedExporter: PhotoLibraryExporting {
     func saveToPhotos(_ url: URL) async throws { fatalError("Export must be skipped") }
 }
-struct FailingRepository: MediaRepository {
+struct FailingProcessedWrite: MediaRepository {
     var directory: URL { base.directory }
     let base: LocalMediaRepository
     var blockedRemoval: URL?
@@ -56,7 +56,7 @@ struct FailingRepository: MediaRepository {
         let exportedCopy = folder.appendingPathComponent("separate-export")
         try FileManager.default.copyItem(at: movie.url, to: exportedCopy)
         let blockedURL = base.deletedDirectory.appendingPathComponent(blocked.id)
-        let gallery = GalleryViewModel(repository: FailingRepository(base: base, blockedRemoval: blockedURL), exporter: UnusedExporter())
+        let gallery = GalleryViewModel(repository: FailingProcessedWrite(base: base, blockedRemoval: blockedURL), exporter: UnusedExporter())
         gallery.reload()
         precondition(gallery.deletedBytes == 0)
         gallery.toggleFavorites([live.id, movie.id, blocked.id, unselected.id])
@@ -140,7 +140,7 @@ struct FailingRepository: MediaRepository {
         precondition(FileManager.default.fileExists(atPath: url.path), "Processed file must exist")
         precondition(repository.items().count == originalCount + 1, "Discard only the successful capture's original")
         let failureStore = LocalMediaRepository(directory: folder.appendingPathComponent("failure"))
-        let failureProcessor = MediaProcessor(repository: FailingRepository(base: failureStore))
+        let failureProcessor = MediaProcessor(repository: FailingProcessedWrite(base: failureStore))
         do {
             _ = try await failureProcessor.processPhoto(data, settings: LookSettings(), preserveOriginal: false)
             fatalError("Expected processed write to fail")
