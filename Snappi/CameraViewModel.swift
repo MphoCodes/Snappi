@@ -174,7 +174,7 @@ final class CameraViewModel: ObservableObject {
                     catch { state.error = error.localizedDescription; return }
                 }
                 for original in disposableOriginals { try? repository.remove(original) }
-            } catch let error as RetainedPhotoError {
+            } catch let error as RetainedCaptureError {
                 state.latest = error.original
                 fail(error)
             } catch {

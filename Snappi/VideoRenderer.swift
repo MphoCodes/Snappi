@@ -30,7 +30,7 @@ enum VideoRenderer {
         exporter.shouldOptimizeForNetworkUse = true
         await exporter.export()
         guard exporter.status == .completed else {
-            throw exporter.error ?? NSError(domain: "Snappi", code: 2, userInfo: [NSLocalizedDescriptionKey: "Video processing was interrupted. The original is kept in your library."])
+            throw exporter.error ?? NSError(domain: "Snappi", code: 2, userInfo: [NSLocalizedDescriptionKey: "Video processing was interrupted."])
         }
         try files.moveItem(at: stagedMovie, to: destination)
     }

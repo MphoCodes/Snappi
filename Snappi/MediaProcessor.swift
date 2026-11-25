@@ -4,7 +4,7 @@ import CoreImage
 import ImageIO
 import UniformTypeIdentifiers
 
-struct RetainedPhotoError: LocalizedError {
+struct RetainedCaptureError: LocalizedError {
     let original: URL
     let cause: Error
     var errorDescription: String? { "Original saved in Your Roll. \(cause.localizedDescription)" }
@@ -40,7 +40,7 @@ actor MediaProcessor: MediaProcessing {
             if !preserveOriginal { try? repository.remove(original) }
             return destination
         } catch {
-            throw RetainedPhotoError(original: original, cause: error)
+            throw RetainedCaptureError(original: original, cause: error)
         }
     }
     func developedPhoto(_ input: CIImage, settings: LookSettings, date: Date) -> CIImage {
@@ -60,7 +60,8 @@ actor MediaProcessor: MediaProcessing {
             if !preserveOriginal { try? repository.remove(source) }
             return destination
         } catch {
-            throw SnappiFailure.make("Video processing failed. The original remains in Snappi’s library. \(error.localizedDescription)")
+            guard FileManager.default.fileExists(atPath: source.path) else { throw error }
+            throw RetainedCaptureError(original: source, cause: error)
         }
     }
 }
