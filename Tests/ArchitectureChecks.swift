@@ -33,16 +33,78 @@ struct UnusedExporter: PhotoLibraryExporting {
 struct FailingProcessedWrite: MediaRepository {
     var directory: URL { base.directory }
     let base: LocalMediaRepository
+    var blockedRemoval: URL?
     func items() -> [CaptureItem] { base.items() }
     func newURL(extension ext: String, original: Bool) -> URL { base.newURL(extension: ext, original: original) }
     func write(_ data: Data, to url: URL) throws {
         if url.lastPathComponent.hasPrefix("snappi-") { throw SnappiFailure.make("Disk full") }
         try base.write(data, to: url)
     }
-    func remove(_ url: URL) throws { try base.remove(url) }
+    func remove(_ url: URL) throws {
+        if url.path == blockedRemoval?.path { throw SnappiFailure.make("File is busy") }
+        try base.remove(url)
+    }
     func thumbnail(_ item: CaptureItem, maxPixelSize: Int) async -> UIImage? { await base.thumbnail(item, maxPixelSize: maxPixelSize) }
 }
 @main struct ArchitectureChecks {
+    @MainActor static func checkStorageCleanup(in folder: URL) throws {
+        let base = LocalMediaRepository(directory: folder)
+        let live = CaptureItem(url: folder.appendingPathComponent("live.jpg"))
+        let movie = CaptureItem(url: folder.appendingPathComponent("movie.mov"))
+        let blocked = CaptureItem(url: folder.appendingPathComponent("busy.jpg"))
+        let unselected = CaptureItem(url: folder.appendingPathComponent("unselected.jpg"))
+        for item in [live, movie, blocked, unselected] {
+            try base.write(Data(repeating: 0x7b, count: 32_768), to: item.url)
+        }
+        let exportedCopy = folder.appendingPathComponent("separate-export")
+        try FileManager.default.copyItem(at: movie.url, to: exportedCopy)
+        let blockedURL = base.deletedDirectory.appendingPathComponent(blocked.id)
+        let gallery = GalleryViewModel(repository: FailingProcessedWrite(base: base, blockedRemoval: blockedURL), exporter: UnusedExporter())
+        gallery.reload()
+        precondition(gallery.deletedBytes == 0)
+        gallery.toggleFavorites([live.id, movie.id, blocked.id, unselected.id])
+        gallery.relocate([movie, blocked, unselected], restoring: false)
+        let unrelated = base.deletedDirectory.appendingPathComponent("notes.txt")
+        try Data([0]).write(to: unrelated)
+        let folderNamedLikeCapture = base.deletedDirectory.appendingPathComponent("folder.jpg", isDirectory: true)
+        try FileManager.default.createDirectory(at: folderNamedLikeCapture, withIntermediateDirectories: false)
+        let linkedCapture = base.deletedDirectory.appendingPathComponent("link.jpg")
+        try FileManager.default.createSymbolicLink(at: linkedCapture, withDestinationURL: live.url)
+        gallery.reload()
+        let initialBytes = gallery.deletedBytes!
+        let movieBytes = gallery.deleted.first { $0.id == movie.id }!.allocatedBytes!
+        precondition(initialBytes > 0 && movieBytes > 0 && gallery.deleted.count == 3)
+        gallery.permanentlyDelete([blocked.id, movie.id])
+        precondition(gallery.message?.contains("Deleted 1 of 2") == true)
+        precondition(gallery.deletedBytes == initialBytes - movieBytes)
+        precondition(Set(gallery.deleted.map(\.id)) == [blocked.id, unselected.id])
+        let expectedFavorites: Set<String> = [live.id, blocked.id, unselected.id]
+        precondition(gallery.favorites == expectedFavorites)
+        let reopened = GalleryViewModel(repository: base, exporter: UnusedExporter())
+        reopened.reload()
+        precondition(reopened.favorites == expectedFavorites)
+        for url in [live.url, unrelated, folderNamedLikeCapture, linkedCapture] {
+            do {
+                try base.permanentlyDelete(CaptureItem(url: url))
+                fatalError("Unexpected permanent deletion of \(url.lastPathComponent)")
+            } catch { precondition(FileManager.default.fileExists(atPath: url.path)) }
+        }
+        // A replacement directory or symlink must never turn a confirmed file deletion into a recursive one.
+        let redirected = LocalMediaRepository(directory: folder.appendingPathComponent("redirected"))
+        try FileManager.default.createDirectory(at: redirected.directory, withIntermediateDirectories: false)
+        try FileManager.default.createSymbolicLink(at: redirected.deletedDirectory, withDestinationURL: folder)
+        do {
+            try redirected.permanentlyDelete(CaptureItem(url: redirected.deletedDirectory.appendingPathComponent(live.id)))
+            fatalError("Deleted through a redirected trash folder")
+        } catch { precondition(FileManager.default.fileExists(atPath: live.url.path)) }
+        reopened.relocate(reopened.deleted.filter { $0.id == unselected.id }, restoring: true)
+        reopened.permanentlyDelete([blocked.id])
+        precondition(reopened.deleted.isEmpty && reopened.deletedBytes == 0)
+        precondition(reopened.favorites == [live.id, unselected.id])
+        let preservedExport = try Data(contentsOf: exportedCopy)
+        precondition(preservedExport == Data(repeating: 0x7b, count: 32_768))
+        print("Recently Deleted storage, selected deletion, partial failure and favorite persistence checks passed")
+    }
     @MainActor static func main() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }
@@ -132,6 +194,7 @@ struct FailingProcessedWrite: MediaRepository {
         precondition(reopened.deleted.isEmpty && Set(reopened.captures(.favorites).map(\.id)) == ids)
         reopened.toggleFavorites(ids)
         precondition(reopened.favorites.isEmpty)
+        try checkStorageCleanup(in: folder.appendingPathComponent("cleanup"))
         print("Gallery favorite, batch delete, reopen and restore checks passed")
         print("Architecture checks passed: countdown cancellation, local save on export denial, capture unlock, file preservation")
     }
