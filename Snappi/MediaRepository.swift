@@ -2,6 +2,7 @@ import Foundation
 import UIKit
 import AVFoundation
 import ImageIO
+import UniformTypeIdentifiers
 
 struct CaptureItem: Identifiable {
     var url: URL
@@ -33,7 +34,9 @@ extension MediaRepository {
             .map { CaptureItem(url: $0) }.sorted { $0.date > $1.date }
     }
     private func isCaptureFile(_ url: URL) -> Bool {
-        guard ["jpg", "mov"].contains(url.pathExtension),
+        let ext = url.pathExtension.lowercased()
+        guard ext == "jpg" || ext == "mov" ||
+                (url.lastPathComponent.hasPrefix("original-") && UTType(filenameExtension: ext)?.conforms(to: .image) == true),
               let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]) else { return false }
         return values.isRegularFile == true && values.isSymbolicLink == false
     }

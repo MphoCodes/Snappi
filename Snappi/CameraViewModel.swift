@@ -136,8 +136,8 @@ final class CameraViewModel: ObservableObject {
                         state.status = "First frame ready. Take the second photo."
                         return
                     }
-                    firstHalfFrame = nil
                     let result = try await processor.finishPair(first, second: data, options: options)
+                    firstHalfFrame = nil
                     url = result.image
                     disposableOriginals = result.disposableOriginals
                     export = options.exportToPhotos
@@ -157,6 +157,9 @@ final class CameraViewModel: ObservableObject {
                     catch { state.error = error.localizedDescription; return }
                 }
                 for original in disposableOriginals { try? repository.remove(original) }
+            } catch let error as RetainedPhotoError {
+                state.latest = error.original
+                fail(error)
             } catch {
                 fail(error)
                 if pair { await refreshRoll() }

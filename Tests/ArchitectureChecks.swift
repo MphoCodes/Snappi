@@ -174,6 +174,18 @@ struct FailingProcessedWrite: MediaRepository {
             precondition(preserved == data)
         }
         let beforeQueue = repository.items().count, beforeReleases = camera.releases
+        let recoveryCamera = FakeCamera()
+        let recoveryModel = CameraViewModel(capture: recoveryCamera, processor: failureProcessor,
+                                            repository: failureStore, exporter: UnusedExporter())
+        let inputPNG = UIImage(data: data)!.pngData()!
+        recoveryCamera.onCapture?(.photo(inputPNG, CaptureOptions(settings: LookSettings(), preserveOriginal: false, exportToPhotos: false)))
+        await recoveryModel.waitForProcessing()
+        guard let recovered = recoveryModel.latest else { fatalError("Publish the retained original to refresh the camera roll") }
+        precondition(recovered.pathExtension == "png" && recoveryModel.error?.contains("Your Roll") == true)
+        let recoveredData = try Data(contentsOf: recovered)
+        precondition(recoveredData == inputPNG)
+        await recoveryModel.refreshRoll()
+        precondition(recoveryModel.rollCount == 2 && recoveryModel.latestThumbnail != nil)
         camera.onCapture?(.photo(Data([0]), CaptureOptions()))
         camera.onCapture?(.photo(data, CaptureOptions(settings: LookSettings(), preserveOriginal: false, exportToPhotos: false)))
         await vm.waitForProcessing()

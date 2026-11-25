@@ -1,6 +1,14 @@
 import Foundation
 import UIKit
 import CoreImage
+import ImageIO
+import UniformTypeIdentifiers
+
+struct RetainedPhotoError: LocalizedError {
+    let original: URL
+    let cause: Error
+    var errorDescription: String? { "Original saved in Your Roll. \(cause.localizedDescription)" }
+}
 
 protocol MediaProcessing: Sendable {
     func beginPair(_ data: Data, options: CaptureOptions) async throws -> HalfFrame
@@ -12,17 +20,28 @@ actor MediaProcessor: MediaProcessing {
     let repository: any MediaRepository
     init(repository: any MediaRepository) { self.repository = repository }
     func processPhoto(_ data: Data, settings: LookSettings, preserveOriginal: Bool) throws -> URL {
-        guard let input = CIImage(data: data, options: [.applyOrientationProperty: true]) else { throw SnappiFailure.make("The photo could not be read.") }
-        let original = repository.newURL(extension: "jpg", original: true)
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let identifier = CGImageSourceGetType(source),
+              let type = UTType(identifier as String), let ext = type.preferredFilenameExtension,
+              let input = CIImage(data: data, options: [.applyOrientationProperty: true]) else {
+            throw SnappiFailure.make("The photo could not be read.")
+        }
+        let original = repository.newURL(extension: type == .jpeg ? "jpg" : ext, original: true)
         // Keep the camera bytes until processing and the atomic write both succeed.
         try repository.write(data, to: original)
         let output = developedPhoto(input, settings: settings, date: Date())
         let context = CIContext()
-        guard let jpeg = context.jpegRepresentation(of: output, colorSpace: CGColorSpaceCreateDeviceRGB(), options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.94]) else { throw SnappiFailure.make("The effect could not be saved. Your original is kept in the library.") }
-        let destination = repository.newURL(extension: "jpg")
-        try repository.write(jpeg, to: destination)
-        if !preserveOriginal { try? repository.remove(original) }
-        return destination
+        do {
+            guard let jpeg = context.jpegRepresentation(of: output, colorSpace: CGColorSpaceCreateDeviceRGB(), options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.94]) else {
+                throw SnappiFailure.make("The effect could not be rendered.")
+            }
+            let destination = repository.newURL(extension: "jpg")
+            try repository.write(jpeg, to: destination)
+            if !preserveOriginal { try? repository.remove(original) }
+            return destination
+        } catch {
+            throw RetainedPhotoError(original: original, cause: error)
+        }
     }
     func developedPhoto(_ input: CIImage, settings: LookSettings, date: Date) -> CIImage {
         var output = Effects.apply(input, settings: settings)
@@ -41,7 +60,6 @@ actor MediaProcessor: MediaProcessing {
             if !preserveOriginal { try? repository.remove(source) }
             return destination
         } catch {
-            try? repository.remove(destination)
             throw SnappiFailure.make("Video processing failed. The original remains in Snappi’s library. \(error.localizedDescription)")
         }
     }
