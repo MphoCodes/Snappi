@@ -134,7 +134,12 @@ struct CameraScreen: View {
     private var viewfinder: some View {
         ZStack {
             Color.black
-            if let preview = camera.preview {
+            if mode == "PAIR", let preview = camera.preview {
+                HalfFrameViewfinder(live: preview, first: camera.firstHalfFrame?.preview, grid: grid) {
+                    focusReticle
+                    focusInteraction
+                }
+            } else if let preview = camera.preview {
                 Image(uiImage: preview).resizable().scaledToFit()
                     .overlay { if grid { GridOverlay() } }
                     .overlay { focusReticle }
@@ -148,20 +153,8 @@ struct CameraScreen: View {
                     if camera.denied { Button("Open Settings") { openSettings() }.buttonStyle(.bordered) }
                 }.padding(40)
             }
-            if !camera.denied {
-                ViewfinderInteraction(imageSize: camera.preview?.size ?? .zero, exposure: camera.exposureBias,
-                                      canMeter: camera.ready && !locked && camera.previewIsFront == camera.isFront,
-                                      onFocus: { camera.focus(at: $0, lock: $1) }, onExposure: camera.exposure,
-                                      onLook: swipeLook, onAdjusting: { adjustingExposure = $0 })
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Live camera preview")
-                    .accessibilityValue(camera.focusSelection?.lockLabel ?? "")
-                    .accessibilityAction(named: "Focus in center") { camera.focus(at: CGPoint(x: 0.5, y: 0.5), lock: false) }
-                    .accessibilityAction(named: "Lock focus and exposure in center") { camera.focus(at: CGPoint(x: 0.5, y: 0.5), lock: true) }
-                    .accessibilityAdjustableAction { direction in
-                        if direction == .increment { camera.exposure(camera.exposureBias + 0.25) }
-                        if direction == .decrement { camera.exposure(camera.exposureBias - 0.25) }
-                    }
+            if !camera.denied && mode != "PAIR" {
+                focusInteraction
             }
             VStack {
                 HStack(spacing: 4) {
@@ -257,6 +250,21 @@ struct CameraScreen: View {
         }
         .animation(motion, value: camera.recording)
     }
+    private var focusInteraction: some View {
+                ViewfinderInteraction(imageSize: camera.preview?.size ?? .zero, exposure: camera.exposureBias,
+                                      canMeter: camera.ready && !locked && camera.previewIsFront == camera.isFront,
+                                      onFocus: { camera.focus(at: $0, lock: $1) }, onExposure: camera.exposure,
+                                      onLook: swipeLook, onAdjusting: { adjustingExposure = $0 })
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Live camera preview")
+                    .accessibilityValue(camera.focusSelection?.lockLabel ?? "")
+                    .accessibilityAction(named: "Focus in center") { camera.focus(at: CGPoint(x: 0.5, y: 0.5), lock: false) }
+                    .accessibilityAction(named: "Lock focus and exposure in center") { camera.focus(at: CGPoint(x: 0.5, y: 0.5), lock: true) }
+                    .accessibilityAdjustableAction { direction in
+                        if direction == .increment { camera.exposure(camera.exposureBias + 0.25) }
+                        if direction == .decrement { camera.exposure(camera.exposureBias - 0.25) }
+                    }
+    }
     private var focusReticle: some View {
         GeometryReader { geometry in
             if let focus = camera.focusSelection, focus.id == visibleFocusID {
@@ -308,7 +316,7 @@ struct CameraScreen: View {
     }
     private var modeSelector: some View {
         HStack(spacing: 30) {
-            ForEach(["PHOTO", "VIDEO"], id: \.self) { item in
+            ForEach(["PHOTO", "PAIR", "VIDEO"], id: \.self) { item in
                 Button {
                     withAnimation(motion) { mode = item }; flash = false; camera.torch(false)
                 } label: {
@@ -320,7 +328,7 @@ struct CameraScreen: View {
                             if mode == item { Capsule().fill(turquoise).frame(width: 18, height: 3).matchedGeometryEffect(id: "mode", in: selection) }
                         }
                     }.frame(minWidth: 60, minHeight: 36)
-                }.buttonStyle(CameraPressStyle()).disabled(locked).accessibilityAddTraits(mode == item ? .isSelected : [])
+                }.buttonStyle(CameraPressStyle()).disabled(locked || camera.firstHalfFrame != nil).accessibilityAddTraits(mode == item ? .isSelected : [])
             }
         }.frame(height: 36)
     }
@@ -342,20 +350,29 @@ struct CameraScreen: View {
                     .overlay(alignment: .bottom) {
                         Text("ROLL").font(.system(size: 8, weight: .medium)).tracking(1.1).offset(y: 11)
                     }.padding(.bottom, 12)
-            }.buttonStyle(CameraPressStyle()).accessibilityLabel("Your roll, \(rollCount) captures").disabled(locked)
+            }.buttonStyle(CameraPressStyle()).accessibilityLabel("Your roll, \(rollCount) captures").disabled(locked || camera.firstHalfFrame != nil)
             Spacer()
             Button { shutter() } label: {
                 ShutterFace(video: mode == "VIDEO", recording: camera.recording, start: camera.recordingStarted)
             }.buttonStyle(CameraPressStyle(pressedScale: 0.93))
                 .disabled((!camera.ready || camera.busy) && !camera.recording || countdown > 0)
-                .accessibilityLabel(camera.recording ? "Stop recording" : mode == "VIDEO" ? "Record video" : "Take photo")
+                .accessibilityLabel(camera.recording ? "Stop recording" : mode == "VIDEO" ? "Record video" : mode == "PAIR" ? (camera.firstHalfFrame == nil ? "Take first frame" : "Take second frame") : "Take photo")
             Spacer()
-            PhotosPicker(selection: $imported, matching: .images) {
-                VStack(spacing: 7) {
-                    Image(systemName: "photo.badge.plus").font(.system(size: 22, weight: .light))
-                    Text("IMPORT").font(.system(size: 8, weight: .medium)).tracking(1.1)
-                }.foregroundStyle(.white.opacity(0.75)).frame(width: 64, height: 76)
-            }.buttonStyle(CameraPressStyle()).disabled(locked).accessibilityLabel("Import a photo")
+            if camera.firstHalfFrame != nil {
+                Button { Task { await camera.cancelPair() } } label: {
+                    VStack(spacing: 7) {
+                        Image(systemName: "xmark.circle").font(.system(size: 22, weight: .light))
+                        Text("CANCEL").font(.system(size: 8, weight: .medium)).tracking(1.1)
+                    }.frame(width: 64, height: 76)
+                }.buttonStyle(CameraPressStyle()).disabled(locked).accessibilityLabel("Cancel half-frame pair")
+            } else {
+                PhotosPicker(selection: $imported, matching: .images) {
+                    VStack(spacing: 7) {
+                        Image(systemName: "photo.badge.plus").font(.system(size: 22, weight: .light))
+                        Text("IMPORT").font(.system(size: 8, weight: .medium)).tracking(1.1)
+                    }.foregroundStyle(.white.opacity(0.75)).frame(width: 64, height: 76)
+                }.buttonStyle(CameraPressStyle()).disabled(locked).accessibilityLabel("Import a photo")
+            }
         }.padding(.horizontal, 30).frame(height: 80)
     }
     @MainActor private func refreshRoll() async {
@@ -372,7 +389,7 @@ struct CameraScreen: View {
     private func openSettings() { if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) } }
     private func shutter() {
         if camera.recording { flash = false }
-        camera.shutter(video: mode == "VIDEO", flash: flash, delay: timerDelay)
+        camera.shutter(video: mode == "VIDEO", flash: flash, delay: timerDelay, pair: mode == "PAIR")
     }
 }
 struct GridOverlay: View {

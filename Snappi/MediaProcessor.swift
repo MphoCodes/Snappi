@@ -3,29 +3,35 @@ import UIKit
 import CoreImage
 
 protocol MediaProcessing: Sendable {
+    func beginPair(_ data: Data, options: CaptureOptions) async throws -> HalfFrame
+    func finishPair(_ first: HalfFrame, second data: Data, options: CaptureOptions) async throws -> FinishedPair
     func processPhoto(_ data: Data, settings: LookSettings, preserveOriginal: Bool) async throws -> URL
     func processVideo(_ source: URL, settings: LookSettings, preserveOriginal: Bool) async throws -> URL
 }
 actor MediaProcessor: MediaProcessing {
-    private let repository: any MediaRepository
+    let repository: any MediaRepository
     init(repository: any MediaRepository) { self.repository = repository }
     func processPhoto(_ data: Data, settings: LookSettings, preserveOriginal: Bool) throws -> URL {
         guard let input = CIImage(data: data, options: [.applyOrientationProperty: true]) else { throw SnappiFailure.make("The photo could not be read.") }
         let original = repository.newURL(extension: "jpg", original: true)
         // Keep the camera bytes until processing and the atomic write both succeed.
         try repository.write(data, to: original)
-        var output = Effects.apply(input, settings: settings)
-        if settings.dateStamp, let stamp = DateStampRenderer.stamp(date: Date()) {
-            let scale = output.extent.width / 1200
-            output = stamp.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-                .transformed(by: CGAffineTransform(translationX: 28 * scale, y: 28 * scale)).composited(over: output).cropped(to: output.extent)
-        }
+        let output = developedPhoto(input, settings: settings, date: Date())
         let context = CIContext()
         guard let jpeg = context.jpegRepresentation(of: output, colorSpace: CGColorSpaceCreateDeviceRGB(), options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.94]) else { throw SnappiFailure.make("The effect could not be saved. Your original is kept in the library.") }
         let destination = repository.newURL(extension: "jpg")
         try repository.write(jpeg, to: destination)
         if !preserveOriginal { try? repository.remove(original) }
         return destination
+    }
+    func developedPhoto(_ input: CIImage, settings: LookSettings, date: Date) -> CIImage {
+        var output = Effects.apply(input, settings: settings)
+        if settings.dateStamp, let stamp = DateStampRenderer.stamp(date: date) {
+            let scale = output.extent.width / 1200
+            output = stamp.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+                .transformed(by: CGAffineTransform(translationX: 28 * scale, y: 28 * scale)).composited(over: output).cropped(to: output.extent)
+        }
+        return output
     }
     func processVideo(_ source: URL, settings: LookSettings, preserveOriginal: Bool) async throws -> URL {
         let destination = repository.newURL(extension: "mov")

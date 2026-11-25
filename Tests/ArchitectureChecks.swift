@@ -46,6 +46,7 @@ struct FailingProcessedWrite: MediaRepository {
     @MainActor static func main() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }
+        try await checkHalfFrames(in: folder)
         let repository = LocalMediaRepository(directory: folder)
         let processor = MediaProcessor(repository: repository)
         let format = UIGraphicsImageRendererFormat(); format.scale = 1
