@@ -170,7 +170,16 @@ struct FailingProcessedWrite: MediaRepository {
         precondition(lockLabel(focus: .unrequested, exposure: .locked) == "Exposure Lock")
         precondition(lockLabel(focus: .locked, exposure: .unrequested) == "Focus Lock")
         precondition(lockLabel(focus: .unrequested, exposure: .unrequested) == nil)
-        print("Gallery, permission-sheet, foreground transitions and metering label checks passed")
+        var session = CameraSessionActivity(requested: true)
+        precondition(!session.shouldStop(running: false, interrupted: true))
+        session.requested = false
+        precondition(session.shouldStop(running: false, interrupted: true), "Withdraw the interrupted session's demand")
+        precondition(session.shouldStop(running: true, interrupted: false), "Stop an automatic restart behind the gallery")
+        session.awaitingCapture = true
+        precondition(!session.shouldStop(running: true, interrupted: false), "Deliver the original before stopping")
+        session.awaitingCapture = false
+        precondition(!session.shouldStop(running: false, interrupted: false))
+        print("Gallery, permission-sheet, foreground transitions, interruption and metering label checks passed")
         let geometry = PreviewGeometry(image: CGSize(width: 1080, height: 1920), view: CGSize(width: 400, height: 400))
         precondition(geometry.unitPoint(CGPoint(x: 30, y: 200)) == nil)
         let point = geometry.unitPoint(CGPoint(x: 143.75, y: 300))!

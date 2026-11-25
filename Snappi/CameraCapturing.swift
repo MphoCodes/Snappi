@@ -16,3 +16,13 @@ protocol CameraCapturing: AnyObject, Sendable {
     func stopVideo()
     func finishCapture()
 }
+
+struct CameraSessionActivity {
+    var requested = false
+    var awaitingCapture = false
+
+    func shouldStop(running: Bool, interrupted: Bool) -> Bool {
+        // AVFoundation can restart an interrupted session even when it currently reports stopped.
+        !requested && !awaitingCapture && (running || interrupted)
+    }
+}
