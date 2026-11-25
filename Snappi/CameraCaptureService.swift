@@ -18,8 +18,12 @@ final class CameraCaptureService: NSObject, CameraCapturing, AVCaptureVideoDataO
     private let video = AVCaptureVideoDataOutput()
     private var input: AVCaptureDeviceInput?
     private var configured = false
-    private var active = true
+    private var activity = CameraSessionActivity()
+    private var requestingCameraAccess = false
+    private var meteringRequest: UUID?
+    private var meteringObservers: [NSKeyValueObservation] = []
     private var capturing = false
+    private var stopVideoOnStart = false
     private var pendingVideoStart: UUID?
     private var options = LookSettings()
     private var shotOptions = LookSettings()
@@ -39,7 +43,12 @@ final class CameraCaptureService: NSObject, CameraCapturing, AVCaptureVideoDataO
         observers.append(NotificationCenter.default.addObserver(forName: .AVCaptureSessionWasInterrupted, object: session, queue: nil) { [weak self] _ in
             self?.publish { $0.ready = false; $0.status = "Camera interrupted. Return to Snappi to continue." }
         })
-        observers.append(NotificationCenter.default.addObserver(forName: .AVCaptureSessionInterruptionEnded, object: session, queue: nil) { [weak self] _ in self?.resume() })
+        observers.append(NotificationCenter.default.addObserver(forName: .AVCaptureSessionDidStartRunning, object: session, queue: nil) { [weak self] _ in
+            self?.reconcileSessionStart()
+        })
+        observers.append(NotificationCenter.default.addObserver(forName: .AVCaptureSessionInterruptionEnded, object: session, queue: nil) { [weak self] _ in
+            self?.recoverAfterInterruption()
+        })
         observers.append(NotificationCenter.default.addObserver(forName: .AVCaptureSessionRuntimeError, object: session, queue: nil) { [weak self] _ in
             self?.publish { $0.ready = false; $0.status = "Camera unavailable"; $0.error = "The camera stopped. Close and reopen Snappi to reconnect." }
         })
@@ -54,12 +63,26 @@ final class CameraCaptureService: NSObject, CameraCapturing, AVCaptureVideoDataO
     func finishCapture() { queue.async { self.capturing = false } }
     func update(settings: LookSettings, preserve: Bool, export: Bool) { lock.lock(); options = settings; keepOriginal = preserve; autoExport = export; lock.unlock() }
     private func snapshot() { lock.lock(); shotOptions = options; shotKeepOriginal = keepOriginal; shotAutoExport = autoExport; lock.unlock() }
-    func start() {
-        Task {
-            let access = await permissions.requestCamera()
-            guard access else { publish { $0.denied = true; $0.status = "Camera access is off" }; return }
-            queue.async { self.active = true; self.configure() }
+    func start() { queue.async {
+        self.activity.requested = true
+        switch self.permissions.cameraStatus {
+        case .authorized: self.configure()
+        case .notDetermined:
+            guard !self.requestingCameraAccess else { return }
+            self.requestingCameraAccess = true
+            Task {
+                let granted = await self.permissions.requestCamera()
+                self.queue.async {
+                    self.requestingCameraAccess = false
+                    guard self.activity.requested else { return }
+                    if granted { self.configure() } else { self.showCameraAccessDenied() }
+                }
+            }
+        default: self.showCameraAccessDenied()
         }
+    } }
+    private func showCameraAccessDenied() {
+        publish { $0.denied = true; $0.ready = false; $0.status = "Camera access is off" }
     }
     private func configure() {
         publish { $0.denied = false }
@@ -82,8 +105,8 @@ final class CameraCaptureService: NSObject, CameraCapturing, AVCaptureVideoDataO
             orientConnections()
             publishMeteringState(camera)
             session.commitConfiguration(); configured = true
-            if active { session.startRunning() }
-            let running = active && session.isRunning, hasFlash = camera.hasFlash
+            if activity.requested { session.startRunning() }
+            let running = activity.requested && session.isRunning && !session.isInterrupted, hasFlash = camera.hasFlash
             publish { $0.ready = running; $0.status = "Ready to capture"; $0.flashAvailable = hasFlash }
         } catch {
             session.inputs.forEach(session.removeInput); session.outputs.forEach(session.removeOutput)
@@ -98,29 +121,37 @@ final class CameraCaptureService: NSObject, CameraCapturing, AVCaptureVideoDataO
             }
         }
     }
-    func resume() { queue.async {
-        self.active = true
-        if self.permissions.cameraStatus == .authorized { self.configure() }
-        else if self.permissions.cameraStatus == .denied {
-            self.publish { $0.denied = true; $0.ready = false; $0.status = "Camera access is off" }
-        }
+    private func reconcileSessionStart() { queue.async { self.stopSessionIfIdle() } }
+    private func recoverAfterInterruption() { queue.async {
+        guard self.activity.requested else { self.stopSessionIfIdle(); return }
+        guard self.configured, self.permissions.cameraStatus == .authorized else { return }
+        self.resumeOnQueue()
     } }
     private func resumeOnQueue() {
-        if active && !session.isRunning { session.startRunning() }
-        let running = session.isRunning, idle = !capturing
+        video.connection(with: .video)?.isEnabled = true
+        if !session.isRunning && !session.isInterrupted { session.startRunning() }
+        let running = session.isRunning && !session.isInterrupted, idle = !capturing
         publish { $0.ready = running; if idle && !$0.busy { $0.status = "Ready to capture" } }
     }
     func suspend() { queue.async {
-        self.active = false
+        self.activity.requested = false
         if self.pendingVideoStart != nil {
             self.pendingVideoStart = nil; self.capturing = false
             self.publish { $0.busy = false; $0.status = "Recording cancelled" }
         }
+        self.video.connection(with: .video)?.isEnabled = false
+        self.stopVideoOnStart = true
         if self.movie.isRecording { self.movie.stopRecording() }
         self.torchOnQueue(false)
-        if self.session.isRunning { self.session.stopRunning() }
+        self.stopSessionIfIdle()
         self.publish { $0.ready = false }
     } }
+    private func stopSessionIfIdle() {
+        // Shutting down the session mid-capture can interrupt delivery of the original.
+        if activity.shouldStop(running: session.isRunning, interrupted: session.isInterrupted) {
+            session.stopRunning()
+        }
+    }
     func switchCamera() { queue.async {
         guard !self.capturing, let old = self.input else { return }
         let position: AVCaptureDevice.Position = self.front ? .back : .front
@@ -129,6 +160,7 @@ final class CameraCaptureService: NSObject, CameraCapturing, AVCaptureVideoDataO
             let next = try AVCaptureDeviceInput(device: device)
             self.session.beginConfiguration(); self.session.removeInput(old)
             if self.session.canAddInput(next) {
+                self.clearMeteringObservation()
                 self.resetMetering(old.device)
                 self.session.addInput(next); self.input = next; self.front.toggle(); self.orientConnections()
                 self.publishMeteringState(device)
@@ -156,7 +188,7 @@ final class CameraCaptureService: NSObject, CameraCapturing, AVCaptureVideoDataO
         } catch { publish { $0.error = error.localizedDescription } }
     }
     func focus(at point: CGPoint, bufferSize: CGSize, front: Bool, lock: Bool) { queue.async {
-        guard self.active, self.session.isRunning, !self.capturing, self.front == front,
+        guard self.activity.requested, self.session.isRunning, !self.capturing, self.front == front,
               let device = self.input?.device else { return }
         // This conversion uses the data output's actual rotation, mirroring and scaling.
         let pixel = CGRect(x: point.x * (bufferSize.width - 1), y: point.y * (bufferSize.height - 1), width: 1, height: 1)
@@ -173,10 +205,31 @@ final class CameraCaptureService: NSObject, CameraCapturing, AVCaptureVideoDataO
             defer { device.unlockForConfiguration() }
             if focus { device.focusPointOfInterest = target; device.focusMode = focusMode }
             if exposure { device.exposurePointOfInterest = target; device.exposureMode = exposureMode }
-            let selection = FocusSelection(point: point, focusLocked: lock && focus, exposureLocked: lock && exposure)
-            self.publish { $0.focusSelection = selection }
+            self.observeMetering(at: point, device: device, focus: lock && focus, exposure: lock && exposure)
         } catch { self.publish { $0.error = error.localizedDescription } }
     } }
+    private func clearMeteringObservation() {
+        meteringRequest = nil
+        meteringObservers.removeAll()
+    }
+    private func observeMetering(at point: CGPoint, device: AVCaptureDevice, focus: Bool, exposure: Bool) {
+        clearMeteringObservation()
+        let request = UUID()
+        meteringRequest = request
+        let update: @Sendable () -> Void = { [weak self] in
+            guard let self else { return }
+            self.queue.async {
+                guard self.meteringRequest == request, let device = self.input?.device else { return }
+                let selection = FocusSelection(id: request, point: point,
+                    focus: .init(requested: focus, adjusting: device.focusMode == .autoFocus, locked: device.focusMode == .locked),
+                    exposure: .init(requested: exposure, adjusting: device.exposureMode == .autoExpose, locked: device.exposureMode == .locked))
+                self.publish { $0.focusSelection = selection }
+            }
+        }
+        if focus { meteringObservers.append(device.observe(\.focusMode, options: [.new]) { _, _ in update() }) }
+        if exposure { meteringObservers.append(device.observe(\.exposureMode, options: [.new]) { _, _ in update() }) }
+        update()
+    }
     func exposure(_ value: Float) { queue.async {
         guard let device = self.input?.device else { return }
         do { try device.lockForConfiguration(); device.setExposureTargetBias(min(max(value, device.minExposureTargetBias), device.maxExposureTargetBias)); device.unlockForConfiguration() }
@@ -197,7 +250,7 @@ final class CameraCaptureService: NSObject, CameraCapturing, AVCaptureVideoDataO
         catch { publish { $0.error = error.localizedDescription } }
     }
     func capturePhoto(flash: Bool) { queue.async {
-        guard self.configured, self.session.isRunning, !self.capturing else {
+        guard self.activity.requested, self.configured, self.session.isRunning, !self.session.isInterrupted, !self.capturing else {
             if !self.capturing { self.publish { $0.busy = false; $0.status = "Camera unavailable" } }
             return
         }
@@ -205,6 +258,7 @@ final class CameraCaptureService: NSObject, CameraCapturing, AVCaptureVideoDataO
         self.publish { $0.busy = true; $0.status = "Developing your photo…" }
         let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
         if self.photo.supportedFlashModes.contains(flash ? .on : .off) { settings.flashMode = flash ? .on : .off }
+        self.activity.awaitingCapture = true
         self.photo.capturePhoto(with: settings, delegate: self)
     } }
     func photoOutput(_ output: AVCapturePhotoOutput, didCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings) {
@@ -213,6 +267,8 @@ final class CameraCaptureService: NSObject, CameraCapturing, AVCaptureVideoDataO
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         let capturedData = photo.fileDataRepresentation()
         queue.async {
+            self.activity.awaitingCapture = false
+            self.stopSessionIfIdle()
             let settings = self.shotOptions, preserve = self.shotKeepOriginal, export = self.shotAutoExport
             if let error { self.finishFailure(error); return }
             guard let data = capturedData else { self.finishFailure(SnappiFailure.make("No photo data was returned.")); return }
@@ -221,7 +277,7 @@ final class CameraCaptureService: NSObject, CameraCapturing, AVCaptureVideoDataO
     }
     func startVideo(to destination: URL) {
         queue.async {
-            guard self.configured, self.session.isRunning, !self.capturing else {
+            guard self.activity.requested, self.configured, self.session.isRunning, !self.session.isInterrupted, !self.capturing else {
                 if !self.capturing { self.publish { $0.busy = false; $0.status = "Camera unavailable" } }
                 return
             }
@@ -234,7 +290,7 @@ final class CameraCaptureService: NSObject, CameraCapturing, AVCaptureVideoDataO
                 self.queue.async {
                     guard self.pendingVideoStart == request else { return }
                     self.pendingVideoStart = nil
-                    guard self.active, self.session.isRunning else {
+                    guard self.activity.requested, self.session.isRunning, !self.session.isInterrupted else {
                         self.capturing = false
                         self.publish { $0.busy = false; $0.status = "Recording cancelled" }
                         return
@@ -246,6 +302,8 @@ final class CameraCaptureService: NSObject, CameraCapturing, AVCaptureVideoDataO
                     }
                     let hasAudio = self.session.inputs.contains { ($0 as? AVCaptureDeviceInput)?.device.hasMediaType(.audio) == true }
                     self.publish { $0.audioEnabled = hasAudio; $0.status = hasAudio ? "Starting recording…" : "Starting silent recording…" }
+                    self.activity.awaitingCapture = true
+                    self.stopVideoOnStart = false
                     self.movie.startRecording(to: destination, recordingDelegate: self)
                 }
             }
@@ -253,10 +311,18 @@ final class CameraCaptureService: NSObject, CameraCapturing, AVCaptureVideoDataO
     }
     func stopVideo() { queue.async { if self.movie.isRecording { self.movie.stopRecording() } } }
     func fileOutput(_ output: AVCaptureFileOutput, didStartRecordingTo fileURL: URL, from connections: [AVCaptureConnection]) {
-        publish { $0.recording = true; $0.recordingStarted = Date(); $0.status = $0.audioEnabled ? "Recording · 60s maximum" : "Recording without audio · 60s maximum" }
+        queue.async {
+            guard !self.stopVideoOnStart else {
+                if self.movie.isRecording { self.movie.stopRecording() }
+                return
+            }
+            self.publish { $0.recording = true; $0.recordingStarted = Date(); $0.status = $0.audioEnabled ? "Recording · 60s maximum" : "Recording without audio · 60s maximum" }
+        }
     }
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo source: URL, from connections: [AVCaptureConnection], error: Error?) {
         queue.async {
+            self.activity.awaitingCapture = false
+            self.stopSessionIfIdle()
             self.torchOnQueue(false)
             self.publish { $0.recording = false; $0.recordingStarted = nil; $0.status = "Developing your film… Keep Snappi open." }
             if let error = error as NSError?, error.userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool != true {

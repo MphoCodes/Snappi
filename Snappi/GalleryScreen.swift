@@ -38,7 +38,9 @@ struct LibraryScreen: View {
                 }
                 ScrollViewReader { proxy in
                     ScrollView {
-                        if items.isEmpty {
+                        if !model.hasLoaded {
+                            ProgressView("Loading your roll…")
+                        } else if items.isEmpty {
                             ContentUnavailableView(emptyTitle, systemImage: filter == .favorites ? "heart" : "photo.on.rectangle")
                         }
                         ForEach(groups, id: \.day) { group in
@@ -97,7 +99,7 @@ struct LibraryScreen: View {
                         .disabled(items.isEmpty && !selecting)
                 }
             }
-            .onAppear { model.reload() }
+            .task { await model.loadIfNeeded() }
             .onChange(of: filter) { endSelection() }
             .confirmationDialog("Move \(marked.count) to Recently Deleted?", isPresented: $confirmDelete, titleVisibility: .visible) {
                 Button("Move to Recently Deleted", role: .destructive) { relocateSelection() }

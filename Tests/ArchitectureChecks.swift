@@ -9,9 +9,10 @@ final class FakeCamera: CameraCapturing, @unchecked Sendable {
     var releases = 0
     var videoStarts = 0
     func update(settings: LookSettings, preserve: Bool, export: Bool) {}
-    func start() {}
-    func resume() {}
-    func suspend() {}
+    var starts = 0
+    var suspensions = 0
+    func start() { starts += 1 }
+    func suspend() { suspensions += 1 }
     func switchCamera() {}
     var lastFocus: (point: CGPoint, size: CGSize, front: Bool, lock: Bool)?
     var lastExposure: Float?
@@ -34,6 +35,7 @@ struct FailingProcessedWrite: MediaRepository {
     var directory: URL { base.directory }
     let base: LocalMediaRepository
     var blockedRemoval: URL?
+    var beforeReturningThumbnail: (@Sendable () async -> Void)?
     func items() -> [CaptureItem] { base.items() }
     func newURL(extension ext: String, original: Bool) -> URL { base.newURL(extension: ext, original: original) }
     func write(_ data: Data, to url: URL) throws {
@@ -44,7 +46,11 @@ struct FailingProcessedWrite: MediaRepository {
         if url.path == blockedRemoval?.path { throw SnappiFailure.make("File is busy") }
         try base.remove(url)
     }
-    func thumbnail(_ item: CaptureItem, maxPixelSize: Int) async -> UIImage? { await base.thumbnail(item, maxPixelSize: maxPixelSize) }
+    func thumbnail(_ item: CaptureItem, maxPixelSize: Int) async -> UIImage? {
+        let image = await base.thumbnail(item, maxPixelSize: maxPixelSize)
+        await beforeReturningThumbnail?()
+        return image
+    }
 }
 @main struct ArchitectureChecks {
     @MainActor static func checkStorageCleanup(in folder: URL) throws {
@@ -115,9 +121,65 @@ struct FailingProcessedWrite: MediaRepository {
         let data = UIGraphicsImageRenderer(size: CGSize(width: 32, height: 48), format: format).image { context in
             UIColor.red.setFill(); context.fill(CGRect(x: 0, y: 0, width: 32, height: 48))
         }.jpegData(compressionQuality: 0.9)!
+        let refreshStore = LocalMediaRepository(directory: folder.appendingPathComponent("refresh"))
+        let slowFile = refreshStore.newURL(extension: "jpg")
+        try refreshStore.write(data, to: slowFile)
+        let (started, didStart) = AsyncStream<Void>.makeStream()
+        let (release, didRelease) = AsyncStream<Void>.makeStream()
+        let delayed = FailingProcessedWrite(base: refreshStore, beforeReturningThumbnail: {
+            didStart.finish()
+            for await _ in release {}
+        })
+        let refreshing = CameraViewModel(capture: FakeCamera(), processor: processor, repository: delayed, exporter: UnusedExporter())
+        let older = Task { await refreshing.refreshRoll() }
+        for await _ in started {}
+        try refreshStore.remove(slowFile)
+        await refreshing.refreshRoll()
+        didRelease.finish()
+        await older.value
+        precondition(refreshing.rollCount == 0 && refreshing.latestThumbnail == nil,
+                     "A slower thumbnail must not restore a deleted capture after a newer roll refresh")
         let camera = FakeCamera()
         let vm = CameraViewModel(capture: camera, processor: processor, repository: repository, exporter: DeniedExporter())
+        vm.updateActivity(scene: .inactive, galleryPresented: false)
+        precondition(camera.starts == 0)
+        vm.updateActivity(scene: .active, galleryPresented: false)
+        vm.updateActivity(scene: .inactive, galleryPresented: false) // System permission sheet
+        vm.updateActivity(scene: .active, galleryPresented: false)
+        precondition(camera.starts == 1 && camera.suspensions == 0)
+        vm.updateActivity(scene: .active, galleryPresented: true)
+        camera.onUpdate? { $0.ready = true } // A queued update from before the gallery opened
+        precondition(!vm.ready)
+        vm.updateActivity(scene: .background, galleryPresented: true)
+        vm.updateActivity(scene: .active, galleryPresented: true)
+        precondition(camera.starts == 1 && camera.suspensions == 1)
+        vm.updateActivity(scene: .background, galleryPresented: false)
+        vm.updateActivity(scene: .inactive, galleryPresented: false)
+        precondition(camera.starts == 1, "Dismissing the gallery offscreen must not start the camera")
+        vm.updateActivity(scene: .active, galleryPresented: false)
+        vm.updateActivity(scene: .active, galleryPresented: true)
+        vm.updateActivity(scene: .active, galleryPresented: false)
+        precondition(camera.starts == 3 && camera.suspensions == 2)
         camera.onUpdate? { $0.ready = true }
+        func lockLabel(focus: MeteringLock, exposure: MeteringLock) -> String? {
+            FocusSelection(id: UUID(), point: .zero, focus: focus, exposure: exposure).lockLabel
+        }
+        precondition(lockLabel(focus: .adjusting, exposure: .locked) == "Metering…")
+        precondition(lockLabel(focus: .locked, exposure: .adjusting) == "Metering…")
+        precondition(lockLabel(focus: .locked, exposure: .locked) == "AE/AF Lock")
+        precondition(lockLabel(focus: .unrequested, exposure: .locked) == "Exposure Lock")
+        precondition(lockLabel(focus: .locked, exposure: .unrequested) == "Focus Lock")
+        precondition(lockLabel(focus: .unrequested, exposure: .unrequested) == nil)
+        var session = CameraSessionActivity(requested: true)
+        precondition(!session.shouldStop(running: false, interrupted: true))
+        session.requested = false
+        precondition(session.shouldStop(running: false, interrupted: true), "Withdraw the interrupted session's demand")
+        precondition(session.shouldStop(running: true, interrupted: false), "Stop an automatic restart behind the gallery")
+        session.awaitingCapture = true
+        precondition(!session.shouldStop(running: true, interrupted: false), "Deliver the original before stopping")
+        session.awaitingCapture = false
+        precondition(!session.shouldStop(running: false, interrupted: false))
+        print("Gallery, permission-sheet, foreground transitions, interruption and metering label checks passed")
         let geometry = PreviewGeometry(image: CGSize(width: 1080, height: 1920), view: CGSize(width: 400, height: 400))
         precondition(geometry.unitPoint(CGPoint(x: 30, y: 200)) == nil)
         let point = geometry.unitPoint(CGPoint(x: 143.75, y: 300))!
@@ -144,10 +206,17 @@ struct FailingProcessedWrite: MediaRepository {
         precondition(camera.captures == 0 && camera.videoStarts == 1, "Pending video must block another capture")
         camera.onUpdate? { $0.busy = false }
         vm.shutter(video: false, flash: false, delay: 3)
-        vm.suspend()
+        precondition(vm.countdown == 3 && vm.busy && !vm.showsProcessingOverlay)
+        vm.updateActivity(scene: .background, galleryPresented: false)
         try await Task.sleep(for: .milliseconds(30))
         precondition(camera.captures == 0 && vm.countdown == 0, "Backgrounding must cancel countdown")
-        camera.onUpdate? { $0.busy = true }
+        vm.updateActivity(scene: .active, galleryPresented: false)
+        camera.onUpdate? { $0.ready = true }
+        vm.shutter(video: false, flash: false, delay: 0)
+        await Task.yield()
+        precondition(camera.captures == 1 && vm.showsProcessingOverlay)
+        vm.updateActivity(scene: .background, galleryPresented: false)
+        precondition(vm.busy && !vm.ready, "Keep the capture reservation until its delegate delivers")
         camera.onCapture?(.photo(data, CaptureOptions(settings: LookSettings(), preserveOriginal: true, exportToPhotos: true)))
         await vm.waitForProcessing()
         precondition(vm.latest != nil && !vm.busy && vm.error == "Photos denied", "Denied export must leave the local capture available")
@@ -174,6 +243,24 @@ struct FailingProcessedWrite: MediaRepository {
             precondition(preserved == data)
         }
         let beforeQueue = repository.items().count, beforeReleases = camera.releases
+        let recoveryCamera = FakeCamera()
+        let recoveryModel = CameraViewModel(capture: recoveryCamera, processor: failureProcessor,
+                                            repository: failureStore, exporter: UnusedExporter())
+        let inputPNG = UIImage(data: data)!.pngData()!
+        recoveryCamera.onCapture?(.photo(inputPNG, CaptureOptions(settings: LookSettings(), preserveOriginal: false, exportToPhotos: false)))
+        await recoveryModel.waitForProcessing()
+        guard let recovered = recoveryModel.latest else { fatalError("Publish the retained original to refresh the camera roll") }
+        precondition(recovered.pathExtension == "png" && recoveryModel.error?.contains("Your Roll") == true)
+        let recoveredData = try Data(contentsOf: recovered)
+        precondition(recoveredData == inputPNG)
+        await recoveryModel.refreshRoll()
+        precondition(recoveryModel.rollCount == 2 && recoveryModel.latestThumbnail != nil)
+        let unreadableMovie = failureStore.newURL(extension: "mov", original: true)
+        try failureStore.write(Data([0]), to: unreadableMovie)
+        recoveryCamera.onCapture?(.video(unreadableMovie, CaptureOptions(exportToPhotos: false)))
+        await recoveryModel.waitForProcessing()
+        precondition(recoveryModel.latest == unreadableMovie && recoveryModel.error?.contains("Your Roll") == true)
+        precondition(failureStore.items().count == 3, "Keep only the original when rendering fails")
         camera.onCapture?(.photo(Data([0]), CaptureOptions()))
         camera.onCapture?(.photo(data, CaptureOptions(settings: LookSettings(), preserveOriginal: false, exportToPhotos: false)))
         await vm.waitForProcessing()
@@ -181,14 +268,14 @@ struct FailingProcessedWrite: MediaRepository {
                      "A failed delivery must not discard the following valid capture")
         precondition(camera.releases == beforeReleases + 1, "Release hardware only after the queued work drains")
         let gallery = GalleryViewModel(repository: repository, exporter: DeniedExporter())
-        gallery.reload()
+        await gallery.loadIfNeeded()
         let pair = Array(gallery.items.prefix(2))
         precondition(pair.count == 2)
         let ids = Set(pair.map(\.id))
         gallery.toggleFavorites(ids)
         gallery.relocate(pair, restoring: false)
         let reopened = GalleryViewModel(repository: repository, exporter: DeniedExporter())
-        reopened.reload()
+        await reopened.loadIfNeeded()
         precondition(Set(reopened.deleted.map(\.id)) == ids && reopened.captures(.favorites).isEmpty)
         reopened.relocate(reopened.deleted, restoring: true)
         precondition(reopened.deleted.isEmpty && Set(reopened.captures(.favorites).map(\.id)) == ids)

@@ -5,7 +5,6 @@ protocol CameraCapturing: AnyObject, Sendable {
     @MainActor var onCapture: ((CapturedMedia) -> Void)? { get set }
     func update(settings: LookSettings, preserve: Bool, export: Bool)
     func start()
-    func resume()
     func suspend()
     func switchCamera()
     func focus(at point: CGPoint, bufferSize: CGSize, front: Bool, lock: Bool)
@@ -16,4 +15,14 @@ protocol CameraCapturing: AnyObject, Sendable {
     func startVideo(to destination: URL)
     func stopVideo()
     func finishCapture()
+}
+
+struct CameraSessionActivity {
+    var requested = false
+    var awaitingCapture = false
+
+    func shouldStop(running: Bool, interrupted: Bool) -> Bool {
+        // AVFoundation can restart an interrupted session even when it currently reports stopped.
+        !requested && !awaitingCapture && (running || interrupted)
+    }
 }

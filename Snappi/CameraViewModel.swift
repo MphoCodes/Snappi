@@ -12,6 +12,7 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var rollCount = 0
     @Published private(set) var latestThumbnail: UIImage?
     @Published private(set) var firstHalfFrame: HalfFrame?
+    private var cameraRequested = false
     private var capturingHalfFrame = false
     private let capture: any CameraCapturing
     private let processor: any MediaProcessing
@@ -22,6 +23,7 @@ final class CameraViewModel: ObservableObject {
     private var processingTask: Task<Void, Never>?
     private var processingID: UUID?
     private var countdownID: UUID?
+    private var rollRefreshID: UUID?
 
     init(capture: any CameraCapturing, processor: any MediaProcessing,
          repository: any MediaRepository, exporter: any PhotoLibraryExporting) {
@@ -30,6 +32,7 @@ final class CameraViewModel: ObservableObject {
         capture.onUpdate = { [weak self] update in
             guard let self else { return }
             update(&self.state)
+            if !self.cameraRequested && self.state.ready { self.state.ready = false }
         }
         capture.onCapture = { [weak self] media in
             guard let self else { return }
@@ -46,9 +49,22 @@ final class CameraViewModel: ObservableObject {
         options = CaptureOptions(settings: settings, preserveOriginal: preserve, exportToPhotos: export)
         capture.update(settings: settings, preserve: preserve, export: export)
     }
-    func start() { capture.start() }
-    func resume() { capture.resume() }
-    func suspend() {
+    var showsProcessingOverlay: Bool { state.busy && !state.recording && countdown == 0 }
+
+    func updateActivity(scene: ScenePhase, galleryPresented: Bool) {
+        // Permission dialogs temporarily make the scene inactive during a capture.
+        if galleryPresented || scene == .background {
+            guard cameraRequested else { return }
+            cameraRequested = false
+            suspend()
+        } else if scene == .active && !cameraRequested {
+            cameraRequested = true
+            capture.start()
+        }
+    }
+
+    private func suspend() {
+        state.ready = false
         if countdownTask != nil { state.busy = false }
         countdownTask?.cancel(); countdownTask = nil; countdownID = nil; countdown = 0
         capture.suspend()
@@ -73,6 +89,7 @@ final class CameraViewModel: ObservableObject {
         if state.recording { capture.stopVideo(); return }
         guard state.ready, !state.busy, countdownTask == nil, firstHalfFrame == nil || pair else { return }
         state.busy = true
+        countdown = delay
         let request = UUID()
         countdownID = request
         countdownTask = Task { [weak self] in
@@ -136,8 +153,8 @@ final class CameraViewModel: ObservableObject {
                         state.status = "First frame ready. Take the second photo."
                         return
                     }
-                    firstHalfFrame = nil
                     let result = try await processor.finishPair(first, second: data, options: options)
+                    firstHalfFrame = nil
                     url = result.image
                     disposableOriginals = result.disposableOriginals
                     export = options.exportToPhotos
@@ -157,6 +174,9 @@ final class CameraViewModel: ObservableObject {
                     catch { state.error = error.localizedDescription; return }
                 }
                 for original in disposableOriginals { try? repository.remove(original) }
+            } catch let error as RetainedCaptureError {
+                state.latest = error.original
+                fail(error)
             } catch {
                 fail(error)
                 if pair { await refreshRoll() }
@@ -168,15 +188,12 @@ final class CameraViewModel: ObservableObject {
         state.error = error.localizedDescription; state.status = "Capture needs attention"
     }
     func refreshRoll() async {
-        let items = repository.items()
-        rollCount = items.count
-        guard let item = items.first(where: { $0.url == state.latest }) ?? items.first else {
-            latestThumbnail = nil
-            return
-        }
-        let image = await repository.thumbnail(item)
-        guard !Task.isCancelled else { return }
-        latestThumbnail = image
+        let request = UUID()
+        rollRefreshID = request
+        let preview = await repository.rollPreview(preferred: state.latest)
+        guard rollRefreshID == request, !Task.isCancelled else { return }
+        rollCount = preview.count
+        latestThumbnail = preview.thumbnail
     }
     func waitForProcessing() async { await processingTask?.value }
 }

@@ -9,6 +9,7 @@ enum GalleryFilter: String, CaseIterable {
 @MainActor
 final class GalleryViewModel: ObservableObject {
     @Published private(set) var items: [CaptureItem] = []
+    @Published private(set) var hasLoaded = false
     @Published private(set) var exporting = false
     @Published var message: String?
     let repository: any MediaRepository
@@ -19,13 +20,27 @@ final class GalleryViewModel: ObservableObject {
     @Published private(set) var deleted: [CaptureItem] = []
     @Published private(set) var deletedBytes: Int64? = 0
     @Published private(set) var favorites: Set<String> = []
+    func loadIfNeeded() async {
+        guard !hasLoaded else { return }
+        let repository = self.repository
+        async let live = repository.items()
+        async let trash = repository.captures(in: repository.deletedDirectory)
+        let listing = await (live, trash)
+        // A mutation may have published a newer listing while the initial scan was running.
+        guard !hasLoaded, !Task.isCancelled else { return }
+        apply(items: listing.0, deleted: listing.1)
+    }
     func reload() {
-        items = repository.items()
-        deleted = repository.captures(in: repository.deletedDirectory)
+        apply(items: repository.items(), deleted: repository.captures(in: repository.deletedDirectory))
+    }
+    private func apply(items: [CaptureItem], deleted: [CaptureItem]) {
+        self.items = items
+        self.deleted = deleted
         let sizes = deleted.compactMap(\.allocatedBytes)
         deletedBytes = sizes.count == deleted.count ? sizes.reduce(0, +) : nil
         do { favorites = try readFavorites() }
         catch { message = error.localizedDescription }
+        hasLoaded = true
     }
     private func readFavorites() throws -> Set<String> {
         guard FileManager.default.fileExists(atPath: repository.favoritesURL.path) else { return [] }

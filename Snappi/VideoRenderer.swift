@@ -19,12 +19,19 @@ enum VideoRenderer {
             throw NSError(domain: "Snappi", code: 1, userInfo: [NSLocalizedDescriptionKey: "This video could not be prepared for export."])
         }
         exporter.videoComposition = composition
-        exporter.outputURL = destination
+        // An interrupted export can leave a zero-byte MOV. Publish only completed movies to the roll.
+        let files = FileManager.default
+        let staging = try files.url(for: .itemReplacementDirectory, in: .userDomainMask,
+                                    appropriateFor: destination, create: true)
+        defer { try? files.removeItem(at: staging) }
+        let stagedMovie = staging.appendingPathComponent(destination.lastPathComponent)
+        exporter.outputURL = stagedMovie
         exporter.outputFileType = .mov
         exporter.shouldOptimizeForNetworkUse = true
         await exporter.export()
         guard exporter.status == .completed else {
-            throw exporter.error ?? NSError(domain: "Snappi", code: 2, userInfo: [NSLocalizedDescriptionKey: "Video processing was interrupted. The original is kept in your library."])
+            throw exporter.error ?? NSError(domain: "Snappi", code: 2, userInfo: [NSLocalizedDescriptionKey: "Video processing was interrupted."])
         }
+        try files.moveItem(at: stagedMovie, to: destination)
     }
 }

@@ -13,6 +13,7 @@ func checkHalfFrames(in folder: URL) async throws {
     let camera = FakeCamera()
     let exporter = PairExporter()
     let model = CameraViewModel(capture: camera, processor: processor, repository: repository, exporter: exporter)
+    model.updateActivity(scene: .active, galleryPresented: false)
     camera.onUpdate? { $0.ready = true }
 
     func photo(_ color: UIColor, landscape: Bool = false) -> Data {
@@ -42,11 +43,19 @@ func checkHalfFrames(in folder: URL) async throws {
 
     await shoot(red, options: options)
     model.shutter(video: false, flash: false, delay: 3, pair: true)
-    model.suspend()
+    model.updateActivity(scene: .background, galleryPresented: false)
     precondition(model.firstHalfFrame != nil && !model.busy)
+    model.updateActivity(scene: .active, galleryPresented: false)
+    camera.onUpdate? { $0.ready = true }
+    let firstURL = model.firstHalfFrame?.original
+    await shoot(Data([0]), options: options)
+    precondition(model.firstHalfFrame?.original == firstURL, "A failed second shot must leave the first panel ready for retry")
+    // The invalid test delivery may retain a recovery file alongside the finished pair.
+    let recoveryFiles = Set(repository.items().map(\.url)).subtracting([firstURL!])
     await shoot(blue, options: options)
     let saved = model.latest!
-    precondition(repository.items().map(\.url) == [saved])
+    precondition(Set(repository.items().map(\.url)) == recoveryFiles.union([saved]))
+    for url in recoveryFiles { try repository.remove(url) }
     let exported = await exporter.urls
     precondition(exported == [saved] && model.firstHalfFrame == nil)
     let image = CIImage(contentsOf: saved)!
@@ -78,6 +87,7 @@ func checkHalfFrames(in folder: URL) async throws {
     }
     let deniedCamera = FakeCamera()
     let denied = CameraViewModel(capture: deniedCamera, processor: processor, repository: repository, exporter: DeniedExporter())
+    denied.updateActivity(scene: .active, galleryPresented: false)
     deniedCamera.onUpdate? { $0.ready = true }
     for data in [red, blue] {
         denied.shutter(video: false, flash: false, delay: 0, pair: true)

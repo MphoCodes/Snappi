@@ -65,8 +65,9 @@ struct CameraScreen: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(navy.ignoresSafeArea())
         }
+        .modifier(CameraLaunchPresentation(hasLivePreview: camera.ready && camera.preview != nil))
         .tint(turquoise).foregroundStyle(.white)
-        .onAppear { sync(); camera.start() }
+        .onAppear { sync(); camera.updateActivity(scene: phase, galleryPresented: showGallery) }
         .task(id: camera.latest) { await refreshRoll() }
         .sensoryFeedback(.selection, trigger: selectedLook)
         .sensoryFeedback(.selection, trigger: mode)
@@ -77,8 +78,12 @@ struct CameraScreen: View {
         .onChange(of: keepOriginal) { _, _ in sync() }
         .onChange(of: exportPhotos) { _, _ in sync() }
         .onChange(of: phase) { _, value in
-            if value == .active { camera.resume() }
-            else if value == .background { flash = false; camera.suspend() }
+            if value == .background { flash = false }
+            camera.updateActivity(scene: value, galleryPresented: showGallery)
+        }
+        .onChange(of: showGallery) { _, presented in
+            if presented && mode == "VIDEO" { flash = false }
+            camera.updateActivity(scene: phase, galleryPresented: presented)
         }
         .onChange(of: imported) { _, item in
             guard let item else { return }
@@ -188,8 +193,8 @@ struct CameraScreen: View {
                 HStack(alignment: .bottom) {
                     VStack(alignment: .leading, spacing: 5) {
                         Text(settings.look.rawValue.uppercased()).font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(1.8)
-                        if let label = camera.focusSelection?.lockLabel {
-                            Label(label, systemImage: "lock.fill").font(.caption2).foregroundStyle(turquoise)
+                        if let focus = camera.focusSelection, let label = focus.lockLabel {
+                            Label(label, systemImage: focus.isAdjusting ? "scope" : "lock.fill").font(.caption2).foregroundStyle(turquoise)
                         }
                         if adjustingExposure || camera.exposureBias != 0 {
                             Text("\(camera.exposureBias, specifier: "%+.1f") EV").font(.caption2.monospacedDigit())
@@ -220,7 +225,7 @@ struct CameraScreen: View {
                     MoveKeyframe(0.65)
                     LinearKeyframe(0, duration: 0.24)
                 }.opacity(reduceMotion ? 0 : 1).allowsHitTesting(false).accessibilityHidden(true)
-            if camera.busy && !camera.recording {
+            if camera.showsProcessingOverlay {
                 VStack(spacing: 10) {
                     ProgressView().tint(turquoise)
                     Text("Developing…").font(.system(size: 12, weight: .medium))
