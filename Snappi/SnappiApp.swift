@@ -65,6 +65,7 @@ struct CameraScreen: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(navy.ignoresSafeArea())
         }
+        .modifier(CameraLaunchPresentation(hasLivePreview: camera.ready && camera.preview != nil))
         .tint(turquoise).foregroundStyle(.white)
         .onAppear { sync(); camera.updateActivity(scene: phase, galleryPresented: showGallery) }
         .task(id: camera.latest) { await refreshRoll() }

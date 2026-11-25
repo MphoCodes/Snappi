@@ -10,6 +10,9 @@
       "Base",
     ],
   },
+  "packages": [
+    { "kind": "remote", "repository": "https://github.com/airbnb/lottie-spm.git", "version": { "version": "4.6.1" } },
+  ],
   "files": [
     { "kind": "folder", "path": "Snappi", "target-membership": [ "Snappi" ] },
     {
@@ -31,6 +34,9 @@
         "frameworks",
         "resources",
       ],
+      "package-product-members": [
+        { "package": "lottie-spm", "product-name": "Lottie", "build-phase": { "build-phase": "frameworks" } },
+      ],
       "build-settings": {
         "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
         "CODE_SIGN_STYLE": "Automatic",
@@ -47,8 +53,7 @@
         "INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]": "YES",
         "INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]": "YES",
         "INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]": "YES",
-        "INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]": "YES",
-        "INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]": "YES",
+        "INFOPLIST_KEY_UILaunchStoryboardName": "LaunchScreen",
         "INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]": "UIStatusBarStyleDefault",
         "INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]": "UIStatusBarStyleDefault",
         "INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad": "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight",
