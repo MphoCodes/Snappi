@@ -10,6 +10,6 @@ xcrun --sdk iphonesimulator swiftc -parse-as-library \
   -sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" \
   Snappi/Effects.swift Snappi/VideoRenderer.swift Snappi/MediaRepository.swift \
   Snappi/MediaProcessor.swift Snappi/PhotoLibraryExporter.swift Snappi/CameraState.swift \
-  Snappi/GalleryViewModel.swift Snappi/CameraCapturing.swift Snappi/CameraViewModel.swift Tests/ArchitectureChecks.swift \
+  Snappi/ViewfinderInteraction.swift Snappi/GalleryViewModel.swift Snappi/CameraCapturing.swift Snappi/CameraViewModel.swift Tests/ArchitectureChecks.swift \
   -o "$test_dir/architecture-checks"
 xcrun simctl spawn "$simulator" "$test_dir/architecture-checks"

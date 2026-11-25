@@ -1,9 +1,30 @@
 import Foundation
 import UIKit
 
+struct FocusSelection: Equatable, Sendable {
+    let point: CGPoint
+    let focusLocked: Bool
+    let exposureLocked: Bool
+    let id = UUID()
+
+    var lockLabel: String? {
+        switch (focusLocked, exposureLocked) {
+        case (true, true): return "AE/AF Lock"
+        case (true, false): return "Focus Lock"
+        case (false, true): return "Exposure Lock"
+        default: return nil
+        }
+    }
+}
+
 struct CameraState {
     var preview: UIImage?
     var lookPreviews: [FilmLook: UIImage] = [:]
+    var previewBufferSize = CGSize.zero
+    var previewIsFront = false
+    var focusSelection: FocusSelection?
+    var exposureBias = 0.0
+    var exposureRange = -2.0...2.0
     var photoCaptured = 0
     var ready = false
     var denied = false
