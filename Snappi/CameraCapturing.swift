@@ -5,7 +5,6 @@ protocol CameraCapturing: AnyObject, Sendable {
     @MainActor var onCapture: ((CapturedMedia) -> Void)? { get set }
     func update(settings: LookSettings, preserve: Bool, export: Bool)
     func start()
-    func resume()
     func suspend()
     func switchCamera()
     func focus(at point: CGPoint, bufferSize: CGSize, front: Bool, lock: Bool)

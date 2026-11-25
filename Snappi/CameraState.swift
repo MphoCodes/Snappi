@@ -1,17 +1,28 @@
 import Foundation
 import UIKit
 
-struct FocusSelection: Equatable, Sendable {
-    let point: CGPoint
-    let focusLocked: Bool
-    let exposureLocked: Bool
-    let id = UUID()
+enum MeteringLock: Sendable {
+    case unrequested, adjusting, locked
+    init(requested: Bool, adjusting: Bool, locked: Bool) {
+        if requested && locked { self = .locked }
+        else if requested && adjusting { self = .adjusting }
+        else { self = .unrequested }
+    }
+}
 
+struct FocusSelection: Equatable, Sendable {
+    let id: UUID
+    let point: CGPoint
+    let focus: MeteringLock
+    let exposure: MeteringLock
+
+    var isAdjusting: Bool { focus == .adjusting || exposure == .adjusting }
     var lockLabel: String? {
-        switch (focusLocked, exposureLocked) {
-        case (true, true): return "AE/AF Lock"
-        case (true, false): return "Focus Lock"
-        case (false, true): return "Exposure Lock"
+        if isAdjusting { return "Metering…" }
+        switch (focus, exposure) {
+        case (.locked, .locked): return "AE/AF Lock"
+        case (.locked, _): return "Focus Lock"
+        case (_, .locked): return "Exposure Lock"
         default: return nil
         }
     }

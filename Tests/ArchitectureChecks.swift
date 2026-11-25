@@ -9,9 +9,10 @@ final class FakeCamera: CameraCapturing, @unchecked Sendable {
     var releases = 0
     var videoStarts = 0
     func update(settings: LookSettings, preserve: Bool, export: Bool) {}
-    func start() {}
-    func resume() {}
-    func suspend() {}
+    var starts = 0
+    var suspensions = 0
+    func start() { starts += 1 }
+    func suspend() { suspensions += 1 }
     func switchCamera() {}
     var lastFocus: (point: CGPoint, size: CGSize, front: Bool, lock: Bool)?
     var lastExposure: Float?
@@ -117,7 +118,36 @@ struct FailingProcessedWrite: MediaRepository {
         }.jpegData(compressionQuality: 0.9)!
         let camera = FakeCamera()
         let vm = CameraViewModel(capture: camera, processor: processor, repository: repository, exporter: DeniedExporter())
+        vm.updateActivity(scene: .inactive, galleryPresented: false)
+        precondition(camera.starts == 0)
+        vm.updateActivity(scene: .active, galleryPresented: false)
+        vm.updateActivity(scene: .inactive, galleryPresented: false) // System permission sheet
+        vm.updateActivity(scene: .active, galleryPresented: false)
+        precondition(camera.starts == 1 && camera.suspensions == 0)
+        vm.updateActivity(scene: .active, galleryPresented: true)
+        camera.onUpdate? { $0.ready = true } // A queued update from before the gallery opened
+        precondition(!vm.ready)
+        vm.updateActivity(scene: .background, galleryPresented: true)
+        vm.updateActivity(scene: .active, galleryPresented: true)
+        precondition(camera.starts == 1 && camera.suspensions == 1)
+        vm.updateActivity(scene: .background, galleryPresented: false)
+        vm.updateActivity(scene: .inactive, galleryPresented: false)
+        precondition(camera.starts == 1, "Dismissing the gallery offscreen must not start the camera")
+        vm.updateActivity(scene: .active, galleryPresented: false)
+        vm.updateActivity(scene: .active, galleryPresented: true)
+        vm.updateActivity(scene: .active, galleryPresented: false)
+        precondition(camera.starts == 3 && camera.suspensions == 2)
         camera.onUpdate? { $0.ready = true }
+        func lockLabel(focus: MeteringLock, exposure: MeteringLock) -> String? {
+            FocusSelection(id: UUID(), point: .zero, focus: focus, exposure: exposure).lockLabel
+        }
+        precondition(lockLabel(focus: .adjusting, exposure: .locked) == "Metering…")
+        precondition(lockLabel(focus: .locked, exposure: .adjusting) == "Metering…")
+        precondition(lockLabel(focus: .locked, exposure: .locked) == "AE/AF Lock")
+        precondition(lockLabel(focus: .unrequested, exposure: .locked) == "Exposure Lock")
+        precondition(lockLabel(focus: .locked, exposure: .unrequested) == "Focus Lock")
+        precondition(lockLabel(focus: .unrequested, exposure: .unrequested) == nil)
+        print("Gallery, permission-sheet, foreground transitions and metering label checks passed")
         let geometry = PreviewGeometry(image: CGSize(width: 1080, height: 1920), view: CGSize(width: 400, height: 400))
         precondition(geometry.unitPoint(CGPoint(x: 30, y: 200)) == nil)
         let point = geometry.unitPoint(CGPoint(x: 143.75, y: 300))!
@@ -144,10 +174,17 @@ struct FailingProcessedWrite: MediaRepository {
         precondition(camera.captures == 0 && camera.videoStarts == 1, "Pending video must block another capture")
         camera.onUpdate? { $0.busy = false }
         vm.shutter(video: false, flash: false, delay: 3)
-        vm.suspend()
+        precondition(vm.countdown == 3 && vm.busy && !vm.showsProcessingOverlay)
+        vm.updateActivity(scene: .background, galleryPresented: false)
         try await Task.sleep(for: .milliseconds(30))
         precondition(camera.captures == 0 && vm.countdown == 0, "Backgrounding must cancel countdown")
-        camera.onUpdate? { $0.busy = true }
+        vm.updateActivity(scene: .active, galleryPresented: false)
+        camera.onUpdate? { $0.ready = true }
+        vm.shutter(video: false, flash: false, delay: 0)
+        await Task.yield()
+        precondition(camera.captures == 1 && vm.showsProcessingOverlay)
+        vm.updateActivity(scene: .background, galleryPresented: false)
+        precondition(vm.busy && !vm.ready, "Keep the capture reservation until its delegate delivers")
         camera.onCapture?(.photo(data, CaptureOptions(settings: LookSettings(), preserveOriginal: true, exportToPhotos: true)))
         await vm.waitForProcessing()
         precondition(vm.latest != nil && !vm.busy && vm.error == "Photos denied", "Denied export must leave the local capture available")

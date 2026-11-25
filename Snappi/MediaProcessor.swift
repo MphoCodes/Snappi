@@ -18,6 +18,7 @@ protocol MediaProcessing: Sendable {
 }
 actor MediaProcessor: MediaProcessing {
     let repository: any MediaRepository
+    lazy var renderContext = CIContext(options: [.cacheIntermediates: false])
     init(repository: any MediaRepository) { self.repository = repository }
     func processPhoto(_ data: Data, settings: LookSettings, preserveOriginal: Bool) throws -> URL {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
@@ -30,9 +31,8 @@ actor MediaProcessor: MediaProcessing {
         // Keep the camera bytes until processing and the atomic write both succeed.
         try repository.write(data, to: original)
         let output = developedPhoto(input, settings: settings, date: Date())
-        let context = CIContext()
         do {
-            guard let jpeg = context.jpegRepresentation(of: output, colorSpace: CGColorSpaceCreateDeviceRGB(), options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.94]) else {
+            guard let jpeg = renderContext.jpegRepresentation(of: output, colorSpace: CGColorSpaceCreateDeviceRGB(), options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.94]) else {
                 throw SnappiFailure.make("The effect could not be rendered.")
             }
             let destination = repository.newURL(extension: "jpg")

@@ -20,7 +20,7 @@ extension MediaProcessor {
         let unit = min(160, panelUnit(image))
         let date = Date()
         let panel = renderPanel(image, unit: unit, settings: options.settings, date: date)
-        guard let preview = CIContext().createCGImage(panel, from: panel.extent) else {
+        guard let preview = renderContext.createCGImage(panel, from: panel.extent) else {
             throw SnappiFailure.make("Could not preview the first frame. Its original is in your roll.")
         }
         return HalfFrame(original: original, options: options, date: date, preview: UIImage(cgImage: preview))
@@ -35,7 +35,7 @@ extension MediaProcessor {
         let secondPanel = renderPanel(right, unit: unit, settings: options.settings, date: Date())
             .transformed(by: CGAffineTransform(translationX: firstPanel.extent.width, y: 0))
         let pair = firstPanel.composited(over: secondPanel)
-        guard let jpeg = CIContext().jpegRepresentation(of: pair, colorSpace: CGColorSpaceCreateDeviceRGB(),
+        guard let jpeg = renderContext.jpegRepresentation(of: pair, colorSpace: CGColorSpaceCreateDeviceRGB(),
                 options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.94]) else {
             throw SnappiFailure.make("Could not develop the pair. Both originals are in your roll.")
         }

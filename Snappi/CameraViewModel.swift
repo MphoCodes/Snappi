@@ -12,6 +12,7 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var rollCount = 0
     @Published private(set) var latestThumbnail: UIImage?
     @Published private(set) var firstHalfFrame: HalfFrame?
+    private var cameraRequested = false
     private var capturingHalfFrame = false
     private let capture: any CameraCapturing
     private let processor: any MediaProcessing
@@ -30,6 +31,7 @@ final class CameraViewModel: ObservableObject {
         capture.onUpdate = { [weak self] update in
             guard let self else { return }
             update(&self.state)
+            if !self.cameraRequested && self.state.ready { self.state.ready = false }
         }
         capture.onCapture = { [weak self] media in
             guard let self else { return }
@@ -46,9 +48,22 @@ final class CameraViewModel: ObservableObject {
         options = CaptureOptions(settings: settings, preserveOriginal: preserve, exportToPhotos: export)
         capture.update(settings: settings, preserve: preserve, export: export)
     }
-    func start() { capture.start() }
-    func resume() { capture.resume() }
-    func suspend() {
+    var showsProcessingOverlay: Bool { state.busy && !state.recording && countdown == 0 }
+
+    func updateActivity(scene: ScenePhase, galleryPresented: Bool) {
+        // Permission dialogs temporarily make the scene inactive during a capture.
+        if galleryPresented || scene == .background {
+            guard cameraRequested else { return }
+            cameraRequested = false
+            suspend()
+        } else if scene == .active && !cameraRequested {
+            cameraRequested = true
+            capture.start()
+        }
+    }
+
+    private func suspend() {
+        state.ready = false
         if countdownTask != nil { state.busy = false }
         countdownTask?.cancel(); countdownTask = nil; countdownID = nil; countdown = 0
         capture.suspend()
@@ -73,6 +88,7 @@ final class CameraViewModel: ObservableObject {
         if state.recording { capture.stopVideo(); return }
         guard state.ready, !state.busy, countdownTask == nil, firstHalfFrame == nil || pair else { return }
         state.busy = true
+        countdown = delay
         let request = UUID()
         countdownID = request
         countdownTask = Task { [weak self] in
