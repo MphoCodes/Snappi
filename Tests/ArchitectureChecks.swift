@@ -35,6 +35,7 @@ struct FailingProcessedWrite: MediaRepository {
     var directory: URL { base.directory }
     let base: LocalMediaRepository
     var blockedRemoval: URL?
+    var beforeReturningThumbnail: (@Sendable () async -> Void)?
     func items() -> [CaptureItem] { base.items() }
     func newURL(extension ext: String, original: Bool) -> URL { base.newURL(extension: ext, original: original) }
     func write(_ data: Data, to url: URL) throws {
@@ -45,7 +46,11 @@ struct FailingProcessedWrite: MediaRepository {
         if url.path == blockedRemoval?.path { throw SnappiFailure.make("File is busy") }
         try base.remove(url)
     }
-    func thumbnail(_ item: CaptureItem, maxPixelSize: Int) async -> UIImage? { await base.thumbnail(item, maxPixelSize: maxPixelSize) }
+    func thumbnail(_ item: CaptureItem, maxPixelSize: Int) async -> UIImage? {
+        let image = await base.thumbnail(item, maxPixelSize: maxPixelSize)
+        await beforeReturningThumbnail?()
+        return image
+    }
 }
 @main struct ArchitectureChecks {
     @MainActor static func checkStorageCleanup(in folder: URL) throws {
@@ -116,6 +121,24 @@ struct FailingProcessedWrite: MediaRepository {
         let data = UIGraphicsImageRenderer(size: CGSize(width: 32, height: 48), format: format).image { context in
             UIColor.red.setFill(); context.fill(CGRect(x: 0, y: 0, width: 32, height: 48))
         }.jpegData(compressionQuality: 0.9)!
+        let refreshStore = LocalMediaRepository(directory: folder.appendingPathComponent("refresh"))
+        let slowFile = refreshStore.newURL(extension: "jpg")
+        try refreshStore.write(data, to: slowFile)
+        let (started, didStart) = AsyncStream<Void>.makeStream()
+        let (release, didRelease) = AsyncStream<Void>.makeStream()
+        let delayed = FailingProcessedWrite(base: refreshStore, beforeReturningThumbnail: {
+            didStart.finish()
+            for await _ in release {}
+        })
+        let refreshing = CameraViewModel(capture: FakeCamera(), processor: processor, repository: delayed, exporter: UnusedExporter())
+        let older = Task { await refreshing.refreshRoll() }
+        for await _ in started {}
+        try refreshStore.remove(slowFile)
+        await refreshing.refreshRoll()
+        didRelease.finish()
+        await older.value
+        precondition(refreshing.rollCount == 0 && refreshing.latestThumbnail == nil,
+                     "A slower thumbnail must not restore a deleted capture after a newer roll refresh")
         let camera = FakeCamera()
         let vm = CameraViewModel(capture: camera, processor: processor, repository: repository, exporter: DeniedExporter())
         vm.updateActivity(scene: .inactive, galleryPresented: false)
@@ -230,14 +253,14 @@ struct FailingProcessedWrite: MediaRepository {
                      "A failed delivery must not discard the following valid capture")
         precondition(camera.releases == beforeReleases + 1, "Release hardware only after the queued work drains")
         let gallery = GalleryViewModel(repository: repository, exporter: DeniedExporter())
-        gallery.reload()
+        await gallery.loadIfNeeded()
         let pair = Array(gallery.items.prefix(2))
         precondition(pair.count == 2)
         let ids = Set(pair.map(\.id))
         gallery.toggleFavorites(ids)
         gallery.relocate(pair, restoring: false)
         let reopened = GalleryViewModel(repository: repository, exporter: DeniedExporter())
-        reopened.reload()
+        await reopened.loadIfNeeded()
         precondition(Set(reopened.deleted.map(\.id)) == ids && reopened.captures(.favorites).isEmpty)
         reopened.relocate(reopened.deleted, restoring: true)
         precondition(reopened.deleted.isEmpty && Set(reopened.captures(.favorites).map(\.id)) == ids)

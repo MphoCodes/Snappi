@@ -23,6 +23,7 @@ final class CameraViewModel: ObservableObject {
     private var processingTask: Task<Void, Never>?
     private var processingID: UUID?
     private var countdownID: UUID?
+    private var rollRefreshID: UUID?
 
     init(capture: any CameraCapturing, processor: any MediaProcessing,
          repository: any MediaRepository, exporter: any PhotoLibraryExporting) {
@@ -187,15 +188,12 @@ final class CameraViewModel: ObservableObject {
         state.error = error.localizedDescription; state.status = "Capture needs attention"
     }
     func refreshRoll() async {
-        let items = repository.items()
-        rollCount = items.count
-        guard let item = items.first(where: { $0.url == state.latest }) ?? items.first else {
-            latestThumbnail = nil
-            return
-        }
-        let image = await repository.thumbnail(item)
-        guard !Task.isCancelled else { return }
-        latestThumbnail = image
+        let request = UUID()
+        rollRefreshID = request
+        let preview = await repository.rollPreview(preferred: state.latest)
+        guard rollRefreshID == request, !Task.isCancelled else { return }
+        rollCount = preview.count
+        latestThumbnail = preview.thumbnail
     }
     func waitForProcessing() async { await processingTask?.value }
 }

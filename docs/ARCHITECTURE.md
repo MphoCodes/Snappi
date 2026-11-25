@@ -45,6 +45,17 @@ Captured-media deliveries are processed in order; a second delivery is not silen
 
 No migration is required. `Documents/Captures`, `snappi-`/`original-` filenames and stored AppStorage keys remain unchanged. Updating the application in place preserves the library.
 
+## Camera roll performance
+
+Each directory scan reads capture dates and file attributes once per entry. Sorting and day grouping reuse those dates. The camera loads its roll preview off the main actor. Opening Your Roll scans live and deleted directories concurrently. Mutations still refresh the visible listing before the next action, and permanent deletion rechecks the current file at its path.
+
+| Operation | Storage-cleanup baseline (`2d122da`) | Updated |
+| --- | ---: | ---: |
+| Camera roll count and first thumbnail | 94.5 ms | 17.0 ms |
+| Initial gallery listing and deleted-storage total | 102.5 ms | 14.8 ms |
+
+Measured on an iPhone 18 Pro simulator with iOS 27.2 and an optimized Swift build. Both builds used the same 1,500 live and 300 deleted synthetic 64×48 JPEGs with varied creation dates. Timings are median elapsed times across 16 warm samples per build, alternating process order and dropping the first sample from each process. Camera refresh included a thumbnail decode, and each gallery sample used a fresh view model. Host load varied. Cold app launch, grid rendering, video thumbnails and physical iPhone performance require separate measurements.
+
 ## Verification
 
 - `./Tests/run.sh`: shared image effects and synthetic video rendering.
